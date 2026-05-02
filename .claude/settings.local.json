@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git clone *)",
+      "Read(//c/Users/User/AppData/Local/Temp/sakhi-sang-repo/**)",
+      "Read(//c/Users/User/AppData/Local/Temp/sakhi-sang-repo/css/**)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/db.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-core.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/css/style.css\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-analytics.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-attendance.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-activities.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-devotees.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-calling.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-home.js\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-ai-chat.js\")"
+    ]
+  }
+}
