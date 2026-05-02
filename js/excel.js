@@ -1,5 +1,5 @@
 /* ══ EXCEL.JS – Import helpers, export functions ══ */
-console.log('%c[Youth Forum] excel.js v140 loaded — template has Kirtan fields + grouped headers', 'background:#1A5C3A;color:#fff;padding:2px 8px;border-radius:3px');
+console.log('%c[Youth Forum] excel.js v140 loaded — template has Kirtan fields + grouped headers', 'background:#0369a1;color:#fff;padding:2px 8px;border-radius:3px');
 
 // ── IMPORT HELPERS ────────────────────────────────────
 function importCol(row, aliases) {
