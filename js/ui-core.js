@@ -4,7 +4,7 @@
 const auth = firebase.auth();
 
 auth.onAuthStateChanged(async (user) => {
-  if (!user) { showAuthScreen(); return; }
+  if (!user) { resetSession(); showAuthScreen(); return; }
   AppState.userId = user.uid;
   try {
     let userDoc = await fdb.collection('users').doc(user.uid).get();
@@ -188,10 +188,54 @@ async function doForgotPassword() {
 
 async function doLogout() {
   if (!confirm('Log out?')) return;
-  // Clear the "Login as Attendance Service Devotee" mode so a normal next
-  // login goes back to the user's actual role.
   sessionStorage.removeItem('loginAsService');
+  resetSession();      // kill listeners + clear state before Firebase signs out
   await auth.signOut();
+}
+
+// ── SESSION RESET (called on every logout / auth-null) ────────────────
+function resetSession() {
+  // 1. Kill all Firestore listeners
+  if (_signupReqUnsub) { _signupReqUnsub(); _signupReqUnsub = null; }
+  _signupReqCache = [];
+  _updateSignupBadges(0);
+
+  // 2. Bust devotee cache — next login always hits Firestore fresh
+  DevoteeCache.bust();
+
+  // 3. Reset all user-specific AppState
+  AppState.userRole     = null;
+  AppState.userTeam     = null;
+  AppState.userPosition = null;
+  AppState.userName     = '';
+  AppState.userId       = null;
+  AppState.profilePic   = null;
+  AppState.isAttSevaDev = false;
+  AppState.callingData  = [];
+  AppState.sessionsCache = {};
+  AppState.filters.team      = '';
+  AppState.filters.callingBy = '';
+  AppState.filters.sessionId = null;
+  AppState._currentSessionId       = null;
+  AppState._currentReportSessionId = null;
+
+  // 4. Wipe dynamic DOM containers so previous user's data is never visible
+  const wipe = id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; };
+  wipe('devotee-list');
+  wipe('calling-list');
+  wipe('dash-kpi-row');
+  wipe('home-greeting');
+
+  // 5. Close every open modal
+  document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
+
+  // 6. Clear filter ribbon chip values and reset chip active state
+  ['fr-session-value','fr-team-value','fr-by-value'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = '';
+  });
+  ['fr-chip-session','fr-chip-team','fr-chip-by'].forEach(id => {
+    document.getElementById(id)?.setAttribute('data-active','false');
+  });
 }
 
 // ── SIGN-UP REQUESTS (super admin) ─────────────────────
@@ -771,12 +815,11 @@ function applyRoleUI() {
     : (team ? `${team} - ${pos || 'Facilitator'}` : (pos || 'Facilitator'));
   pill.style.background = role === 'superAdmin' ? 'rgba(201,168,76,.5)' : role === 'teamAdmin' ? 'rgba(82,183,136,.4)' : 'rgba(82,183,136,.25)';
 
-  if (role === 'superAdmin') {
-    document.getElementById('admin-gear-btn')?.classList.remove('hidden');
-    document.getElementById('clear-data-btn')?.classList.remove('hidden');
-  }
+  const isSA = role === 'superAdmin';
+  document.getElementById('admin-gear-btn')?.classList.toggle('hidden', !isSA);
+  document.getElementById('clear-data-btn')?.classList.toggle('hidden', !isSA);
   document.querySelectorAll('.super-admin-only').forEach(el => {
-    el.style.display = role === 'superAdmin' ? '' : 'none';
+    el.style.display = isSA ? '' : 'none';
   });
 
   // serviceDevotee (Facilitator) gets same tab access as teamAdmin — all team tabs

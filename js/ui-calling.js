@@ -728,20 +728,31 @@ async function _loadCallingSummary(week, el) {
     }
     const weekLabel = formatDate(week);
     let gTotal=0, gCalled=0, gNC=0, gYes=0, gOnline=0, gFestival=0, gNI=0;
+    let gUnsubmitted = 0;
     let bodyRows = '';
 
     teams.forEach((team, ti) => {
       const t = report[team];
-      gTotal += t.total; gCalled += t.called; gNC += t.notCalled;
+      const unsub = t.unsubmittedTotal || 0;
+      // "Effective Not Called" = devotees not recorded by submitted callers
+      //                        + ALL devotees in lists of callers who never submitted
+      const effNC = t.notCalled + unsub;
+      gTotal += t.total; gCalled += t.called; gNC += effNC;
       gYes += t.yes; gOnline += (t.online||0); gFestival += (t.festival||0); gNI += (t.notInterested||0);
+      gUnsubmitted += unsub;
 
       const teamId = 'team-' + ti;
+      // Build "Not Called" cell — show unsubmitted portion separately
+      const ncCell = unsub > 0
+        ? `<span style="color:#c62828">${t.notCalled}</span><span style="color:#e65100;font-size:.72rem;margin-left:.2rem" title="${unsub} from unsubmitted callers">+${unsub}⚠</span>`
+        : `<span style="color:#c62828">${t.notCalled}</span>`;
+
       // Team header row — clickable to expand/collapse facilitators
       bodyRows += `<tr class="cs-team-row" data-team-id="${teamId}" style="background:var(--accent-light);font-weight:700;font-size:.83rem;cursor:pointer" onclick="_toggleCSReportTeam('${teamId}', this)">
         <td colspan="2"><i class="fas fa-chevron-right cs-team-chev" style="font-size:.7rem;color:var(--text-muted);margin-right:.4rem"></i>${teamBadge(team)}</td>
         <td style="text-align:center">${t.total}</td>
         <td style="text-align:center">${t.called}</td>
-        <td style="text-align:center;color:#c62828">${t.notCalled}</td>
+        <td style="text-align:center">${ncCell}</td>
         <td style="text-align:center;color:var(--success)">${t.yes}</td>
         <td style="text-align:center;color:#0288d1">${t.online||0}</td>
         <td style="text-align:center;color:#f57f17">${t.festival||0}</td>
@@ -788,25 +799,25 @@ async function _loadCallingSummary(week, el) {
       <strong><i class="fas fa-phone-alt"></i> Calling Summary — ${weekLabel}</strong>
     </div>
     <div class="table-scroll">
-    <table class="calling-table" style="margin:0">
+    <table class="calling-table cs-report-table" style="margin:0;min-width:440px">
       <thead><tr>
-        <th style="min-width:160px">Team / Calling By</th>
-        <th style="min-width:110px">Position</th>
-        <th style="text-align:center">Total</th>
-        <th style="text-align:center">Called</th>
-        <th style="text-align:center;color:#c62828">Not Called</th>
-        <th style="text-align:center;color:var(--success)">Yes</th>
-        <th style="text-align:center;color:#0288d1">Online</th>
-        <th style="text-align:center;color:#f57f17">Festival</th>
-        <th style="text-align:center;color:var(--danger)">Not Interested</th>
+        <th style="min-width:108px">Team / Calling By</th>
+        <th style="min-width:66px">Position</th>
+        <th style="text-align:center;min-width:36px">Total</th>
+        <th style="text-align:center;min-width:38px">Called</th>
+        <th style="text-align:center;min-width:50px;color:#c62828">Not Called</th>
+        <th style="text-align:center;min-width:34px;color:var(--success)">Yes</th>
+        <th style="text-align:center;min-width:38px;color:#0288d1">Online</th>
+        <th style="text-align:center;min-width:38px;color:#f57f17">Festival</th>
+        <th style="text-align:center;min-width:34px;color:var(--danger)">NI</th>
       </tr></thead>
       <tbody>
         ${bodyRows}
-        <tr style="background:#1a5c3a;color:#fff;font-weight:700;font-size:.83rem">
+        <tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.83rem">
           <td colspan="2">Grand Total</td>
           <td style="text-align:center">${gTotal}</td>
           <td style="text-align:center">${gCalled}</td>
-          <td style="text-align:center">${gNC}</td>
+          <td style="text-align:center">${gNC}${gUnsubmitted > 0 ? `<span style="font-size:.72rem;color:#ffcc80;font-weight:400;margin-left:.3rem">(incl. ${gUnsubmitted} unsubmitted)</span>` : ''}</td>
           <td style="text-align:center">${gYes}</td>
           <td style="text-align:center">${gOnline}</td>
           <td style="text-align:center">${gFestival}</td>
@@ -883,16 +894,16 @@ async function _loadAccuracyReport(week, el) {
       <span style="margin-left:.75rem;font-size:.8rem;color:var(--text-muted)">Click a number to see the list</span>
     </div>
     <div class="table-scroll">
-    <table class="calling-table" style="margin:0">
+    <table class="calling-table cs-report-table" style="margin:0;min-width:360px">
       <thead><tr>
-        <th style="min-width:160px">Team / Calling By</th>
+        <th style="min-width:130px">Team / Calling By</th>
         <th style="text-align:center;color:var(--success)">Said Yes</th>
         <th style="text-align:center;color:var(--success)">Came</th>
         <th style="text-align:center;color:#c62828">Absent</th>
       </tr></thead>
       <tbody>
         ${bodyRows}
-        <tr style="background:#1a5c3a;color:#fff;font-weight:700;font-size:.83rem">
+        <tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.83rem">
           <td>Grand Total</td>
           <td style="text-align:center">${grandYes}</td>
           <td style="text-align:center">${grandYes - grandAbsent}</td>

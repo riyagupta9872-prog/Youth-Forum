@@ -251,10 +251,10 @@ async function loadDashboard() {
               <td class="dt-num"><button onclick="openDashboardList('attended', '${r.team.replace(/'/g,"\\'")}')">${r.attended}</button></td>
               <td class="dt-num">${r.target}</td>
               <td class="dt-pct ${pctCls(r.pct)}">${r.pct}%</td>
-              <td class="dt-num">${r.books   || '—'}</td>
-              <td class="dt-num">${r.services|| '—'}</td>
-              <td class="dt-num">${r.regs    || '—'}</td>
-              <td class="dt-num">${r.donation > 0 ? r.donation.toLocaleString('en-IN') : '—'}</td>
+              <td class="dt-num">${r.books    > 0 ? `<button onclick="openActivityDetailModal('books','${r.team.replace(/'/g,"\\'")}')"><i class="fas fa-book" style="font-size:.65rem;margin-right:.2rem"></i>${r.books}</button>`    : '—'}</td>
+              <td class="dt-num">${r.services > 0 ? `<button onclick="openActivityDetailModal('service','${r.team.replace(/'/g,"\\'")}')"><i class="fas fa-hands-helping" style="font-size:.65rem;margin-right:.2rem"></i>${r.services}</button>` : '—'}</td>
+              <td class="dt-num">${r.regs     > 0 ? `<button onclick="openActivityDetailModal('regs','${r.team.replace(/'/g,"\\'")}')"><i class="fas fa-clipboard-check" style="font-size:.65rem;margin-right:.2rem"></i>${r.regs}</button>`     : '—'}</td>
+              <td class="dt-num">${r.donation > 0 ? `<button onclick="openActivityDetailModal('donation','${r.team.replace(/'/g,"\\'")}')"><i class="fas fa-hand-holding-usd" style="font-size:.65rem;margin-right:.2rem"></i>₹${r.donation.toLocaleString('en-IN')}</button>` : '—'}</td>
             </tr>`).join('')}
             <tr>
               <td class="dt-team">Grand Total</td>
@@ -263,21 +263,121 @@ async function loadDashboard() {
               <td class="dt-num">${total.attended}</td>
               <td class="dt-num">${total.target}</td>
               <td class="dt-pct ${pctCls(totalPct)}" style="color:${totalPct>=80?'#86efac':totalPct>=50?'#fde68a':'#fca5a5'}">${totalPct}%</td>
-              <td class="dt-num">${total.books    || '—'}</td>
-              <td class="dt-num">${total.services || '—'}</td>
-              <td class="dt-num">${total.regs     || '—'}</td>
-              <td class="dt-num">${total.donation > 0 ? total.donation.toLocaleString('en-IN') : '—'}</td>
+              <td class="dt-num">${total.books    > 0 ? `<button onclick="openActivityDetailModal('books',null)"><i class="fas fa-book" style="font-size:.65rem;margin-right:.2rem"></i>${total.books}</button>`       : '—'}</td>
+              <td class="dt-num">${total.services > 0 ? `<button onclick="openActivityDetailModal('service',null)"><i class="fas fa-hands-helping" style="font-size:.65rem;margin-right:.2rem"></i>${total.services}</button>` : '—'}</td>
+              <td class="dt-num">${total.regs     > 0 ? `<button onclick="openActivityDetailModal('regs',null)"><i class="fas fa-clipboard-check" style="font-size:.65rem;margin-right:.2rem"></i>${total.regs}</button>`     : '—'}</td>
+              <td class="dt-num">${total.donation > 0 ? `<button onclick="openActivityDetailModal('donation',null)"><i class="fas fa-hand-holding-usd" style="font-size:.65rem;margin-right:.2rem"></i>₹${total.donation.toLocaleString('en-IN')}</button>` : '—'}</td>
             </tr>
           </tbody>
         </table>
       </div>`;
 
-    AppState._dashboard = { rows, sessionId, sessionDate, callingDate, csByDevotee, presentSet, allDevotees };
+    AppState._dashboard = { rows, sessionId, sessionDate, callingDate, csByDevotee, presentSet, allDevotees, books, services, regs, donations, activityStart, activityEnd };
   } catch (e) {
     if (gen !== _dashGen) return;
     console.error('loadDashboard', e);
     el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load dashboard — <button onclick="loadDashboard()" style="text-decoration:underline;background:none;border:none;cursor:pointer;color:inherit">Retry</button></p></div>';
   }
+}
+
+// Opens a drill-down modal for Books / Service / Registration / Donation cells
+// in the Coordinator Performance grid. team = null means "all teams" (grand total row).
+function openActivityDetailModal(type, team) {
+  const dash = AppState._dashboard;
+  if (!dash) return;
+
+  let rawData, title, colLabel, getVal;
+  if (type === 'books') {
+    rawData  = dash.books    || [];
+    title    = (team ? `${team} — ` : '') + 'Books Distributed';
+    colLabel = 'Qty';
+    getVal   = b => parseInt(b.quantity) || 0;
+  } else if (type === 'service') {
+    rawData  = dash.services || [];
+    title    = (team ? `${team} — ` : '') + 'Services';
+    colLabel = 'Description';
+    getVal   = s => s.serviceDescription || '—';
+  } else if (type === 'regs') {
+    rawData  = dash.regs     || [];
+    title    = (team ? `${team} — ` : '') + 'Registrations';
+    colLabel = 'Count';
+    getVal   = r => parseInt(r.count) || 1;
+  } else if (type === 'donation') {
+    rawData  = dash.donations || [];
+    title    = (team ? `${team} — ` : '') + 'Donations';
+    colLabel = 'Amount (₹)';
+    getVal   = d => parseFloat(d.amount) || 0;
+  } else return;
+
+  const filtered = team ? rawData.filter(x => x.teamName === team) : rawData;
+  filtered.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.devoteeName || '').localeCompare(b.devoteeName || ''));
+
+  const periodNote = dash.activityStart
+    ? `<span style="font-size:.73rem;color:var(--text-muted);margin-left:.45rem;font-weight:400">${dash.activityStart} → ${dash.activityEnd}</span>`
+    : '';
+
+  const isDonation = type === 'donation';
+  const bodyRows = filtered.map((x, i) => {
+    const val = getVal(x);
+    if (isDonation) {
+      return `<tr>
+        <td style="color:var(--text-muted);text-align:center;font-size:.75rem">${i + 1}</td>
+        <td>${teamBadge(x.teamName || '—')}</td>
+        <td style="text-align:center;font-weight:700">₹${(parseFloat(x.amount)||0).toLocaleString('en-IN')}</td>
+        <td style="font-size:.78rem;color:var(--text-muted)">${x.note || '—'}</td>
+        <td style="font-size:.75rem;color:var(--text-muted)">${x.date || ''}</td>
+      </tr>`;
+    }
+    const name = x.devoteeName || '—';
+    const valCell = type === 'service'
+      ? `<td style="font-size:.78rem;max-width:160px;word-break:break-word">${val}</td>`
+      : `<td style="text-align:center;font-weight:700">${val}</td>`;
+    return `<tr>
+      <td style="color:var(--text-muted);text-align:center;font-size:.75rem">${i + 1}</td>
+      <td style="font-weight:600;font-size:.82rem">${name}</td>
+      <td>${teamBadge(x.teamName || '—')}</td>
+      ${valCell}
+    </tr>`;
+  }).join('');
+
+  const grandVal = isDonation
+    ? '₹' + filtered.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0).toLocaleString('en-IN')
+    : type === 'service'
+      ? filtered.length + ' entries'
+      : filtered.reduce((s, x) => s + (parseInt(type === 'books' ? x.quantity : x.count) || 1), 0);
+
+  document.getElementById('_act-detail-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = '_act-detail-modal';
+  overlay.className = 'modal-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:520px;width:95vw">
+      <div class="modal-header">
+        <h2 style="font-size:1rem"><i class="fas fa-list-ul"></i> ${title}${periodNote}</h2>
+        <button class="btn-icon close" onclick="document.getElementById('_act-detail-modal')?.remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div style="overflow:auto;max-height:62vh;padding:.25rem .75rem .75rem">
+        <table class="calling-table cs-report-table" style="margin:0;min-width:300px">
+          <thead><tr>
+            <th style="text-align:center;min-width:28px">#</th>
+            ${isDonation
+              ? `<th>Team</th><th style="text-align:center">Amount</th><th>Note</th><th>Date</th>`
+              : `<th>Devotee</th><th>Team</th><th style="${type !== 'service' ? 'text-align:center' : ''}">${colLabel}</th>`}
+          </tr></thead>
+          <tbody>${bodyRows || '<tr><td colspan="4" style="text-align:center;padding:1.5rem;color:var(--text-muted)">No entries</td></tr>'}</tbody>
+          ${filtered.length > 0 ? `<tfoot><tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.82rem">
+            <td colspan="${isDonation ? 2 : 3}">Total</td>
+            <td style="text-align:center">${grandVal}</td>
+            ${isDonation ? '<td colspan="2"></td>' : ''}
+          </tr></tfoot>` : ''}
+        </table>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  history.pushState(null, '', location.href);
 }
 
 function _setText(id, val) {
