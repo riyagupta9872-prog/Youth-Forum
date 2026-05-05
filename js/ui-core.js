@@ -828,10 +828,10 @@ function applyRoleUI() {
     devotees:       ['superAdmin', 'teamAdmin', 'serviceDevotee'],
     calling:        ['superAdmin', 'teamAdmin', 'serviceDevotee'],
     attendance:     ['superAdmin', 'teamAdmin', 'serviceDevotee'],
-    books:          ['teamAdmin', 'serviceDevotee'],
-    service:        ['teamAdmin', 'serviceDevotee'],
-    registration:   ['teamAdmin', 'serviceDevotee'],
-    donation:       ['teamAdmin', 'serviceDevotee'],
+    books:          ['superAdmin', 'teamAdmin', 'serviceDevotee'],
+    service:        ['superAdmin', 'teamAdmin', 'serviceDevotee'],
+    registration:   ['superAdmin', 'teamAdmin', 'serviceDevotee'],
+    donation:       ['superAdmin', 'teamAdmin', 'serviceDevotee'],
     care:           ['superAdmin', 'teamAdmin', 'serviceDevotee'],
     events:         ['superAdmin', 'teamAdmin', 'serviceDevotee'],
     'calling-mgmt': ['superAdmin'],
@@ -1794,6 +1794,7 @@ const TAB_VIEWS = {
     { divider: true, label: 'REPORTS' },
     { key: 'weekly',     label: 'Weekly Report',      icon: 'fa-chart-bar' },
     { key: 'submission', label: 'Submission Reports', icon: 'fa-chart-line' },
+    { key: 'history',    label: 'Calling History',    icon: 'fa-history' },
   ],
   attendance: [
     { key: 'live',      label: 'Live Attendance',  icon: 'fa-check-circle' },
@@ -1804,6 +1805,7 @@ const TAB_VIEWS = {
     { key: 'serious',   label: 'Serious Analysis', icon: 'fa-star' },
     { key: 'teams',     label: 'Team Leaderboard', icon: 'fa-trophy' },
     { key: 'trends',    label: 'Trends',           icon: 'fa-chart-line' },
+    { key: 'accuracy',  label: 'Accuracy',         icon: 'fa-bullseye' },
   ],
   books:        [{ key:'log', label:'Log Entry', icon:'fa-pen' }, { key:'reports', label:'Reports', icon:'fa-chart-bar' }],
   service:      [{ key:'log', label:'Log Entry', icon:'fa-pen' }, { key:'reports', label:'Reports', icon:'fa-chart-bar' }],
@@ -2044,6 +2046,7 @@ async function applyTabView(tab, view) {
         serious:    'serious-analysis',
         teams:      'team-leaderboard',
         trends:     'trends',
+        accuracy:   'att-accuracy',
       })[view];
       if (subId) {
         const innerBtn = document.querySelector(`#att-panel-reports .sub-tab[onclick*="'${subId}'"]`);
@@ -2150,9 +2153,12 @@ function switchCallingSubTab(btn, sub) {
   btn?.classList.add('active');
   document.getElementById('calling-panel-list').classList.toggle('active',    sub === 'calls');
   document.getElementById('calling-panel-reports').classList.toggle('active', sub === 'reports');
+  document.getElementById('calling-panel-history')?.classList.toggle('active', sub === 'history');
   AppState._callingSubTab = sub;
   if (sub === 'calls') {
     loadCallingStatus?.();
+  } else if (sub === 'history') {
+    loadCallingHistoryTab?.();
   } else {
     _reportsCategory = 'calling';
     if (typeof _populateReportWeeks === 'function') _populateReportWeeks().then(() => loadCallingReports?.());
@@ -2171,6 +2177,7 @@ function switchSubTab(btn, id) {
   if (id === 'team-leaderboard')  loadTeamLeaderboard();
   if (id === 'attendance-detail') loadAttendanceDetail();
   if (id === 'newcomers-report')  loadNewComersReport?.();
+  if (id === 'att-accuracy')      loadAttAccuracyReport?.();
   renderBreadcrumb?.();
 }
 

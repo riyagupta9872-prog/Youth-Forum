@@ -172,6 +172,7 @@ async function openProfileModal(id) {
           <div class="profile-field"><label>Reference By</label><span id="pv-ref-by">${d.reference_by || '—'}</span></div>
           <div class="profile-field"><label>Facilitator</label><span>${d.facilitator || '—'}</span></div>
           <div class="profile-field"><label>Calling By</label><span>${d.calling_by || '—'}</span></div>
+          ${d.remarks ? `<div class="profile-field full" style="grid-column:1/-1"><label><i class="fas fa-sticky-note" style="color:var(--warning)"></i> Remarks</label><span style="white-space:pre-wrap;color:var(--text);background:var(--warning-light);border-left:3px solid var(--warning);padding:.4rem .6rem;border-radius:0 var(--radius-sm) var(--radius-sm) 0;display:block;font-size:.85rem">${d.remarks}</span></div>` : ''}
         </div>
       </div>
 
@@ -401,6 +402,7 @@ async function populateEditForm(id) {
       }
     }
     if (d.calling_by) { document.getElementById('f-calling-by').value = d.calling_by; const pi = document.querySelector('#picker-calling-by .picker-input'); if(pi){pi.value=d.calling_by;pi.classList.add('has-value');} }
+    const fRemarks = document.getElementById('f-remarks'); if (fRemarks) fRemarks.value = d.remarks || '';
     document.getElementById('f-education').value          = d.education || '';
     document.getElementById('f-email').value              = d.email || '';
     document.getElementById('f-profession').value         = d.profession || '';
@@ -452,6 +454,7 @@ function getFormPayload() {
                             : '',
     wants_kirtan_class:       document.getElementById('f-wants-kirtan').value,
     prior_sessions_attended:  parseInt(document.getElementById('f-prior-sessions')?.value) || 0,
+    remarks:                  document.getElementById('f-remarks')?.value.trim() || '',
   };
 }
 

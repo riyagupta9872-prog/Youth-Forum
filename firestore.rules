@@ -21,6 +21,7 @@ service cloud.firestore {
     match /attendanceRecords/{id} { allow read, write: if isAuth(); }
     match /callingStatus/{id}  { allow read, write: if isAuth(); }
     match /callingSubmissions/{id} { allow read, write: if isAuth(); }
+    match /callingSubmissions/{id}/history/{histId} { allow read, write: if isAuth(); }
     match /events/{id}         { allow read, write: if isAuth(); }
     match /eventDevotees/{id}  { allow read, write: if isAuth(); }
     match /profileChanges/{id} { allow read, write: if isAuth(); }

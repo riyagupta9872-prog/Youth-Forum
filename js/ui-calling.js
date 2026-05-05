@@ -3,6 +3,143 @@
 let _callingActiveTab = 'list';
 let _callingLocked = false;
 
+// ── SHORT LABELS for status in history table ──────────────────────
+const _STATUS_SHORT = {
+  'Yes':               '✓ Yes',
+  'did_not_pick':      'DNP',
+  'incoming_na':       'Inc.NA',
+  'out_of_station':    'OOS',
+  'exams':             'Exams',
+  'online_class':      'Online',
+  'wrong_number':      'Wrong#',
+  'out_of_service':    'OOS',
+  'festival_calling':  'Festival',
+  'not_interested_now':'NI',
+};
+const _STATUS_COLOR = {
+  'Yes':               'var(--success)',
+  'did_not_pick':      '#e65100',
+  'incoming_na':       'var(--text-muted)',
+  'wrong_number':      'var(--danger)',
+  'out_of_station':    '#0288d1',
+  'exams':             '#0288d1',
+  'online_class':      '#7b1fa2',
+  'out_of_service':    'var(--text-muted)',
+  'festival_calling':  '#f57f17',
+  'not_interested_now':'var(--danger)',
+};
+
+async function loadCallingHistoryTab() {
+  const wrap = document.getElementById('calling-history-content');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="loading" style="padding:2rem"><i class="fas fa-spinner fa-spin"></i> Loading 4-week history…</div>';
+
+  try {
+    // Build last 4 Sunday dates
+    const weeks = [];
+    const cur = new Date();
+    cur.setDate(cur.getDate() - cur.getDay()); // most recent Sunday
+    for (let i = 0; i < 4; i++) {
+      weeks.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() - 7);
+    }
+
+    const allDevotees = await DevoteeCache.all();
+    const isSA    = AppState.userRole === 'superAdmin';
+    const teamFlt = AppState.filters.team || '';
+
+    // Who to show: SA sees all (team-filtered); others see only their calling list
+    let devotees = isSA
+      ? allDevotees
+      : allDevotees.filter(d => d.callingBy === AppState.userName);
+
+    if (teamFlt) devotees = devotees.filter(d => d.teamName === teamFlt);
+    devotees.sort((a, b) =>
+      (a.teamName || '').localeCompare(b.teamName || '') || a.name.localeCompare(b.name)
+    );
+
+    if (!devotees.length) {
+      wrap.innerHTML = '<div class="empty-state"><i class="fas fa-phone-alt"></i><p>No devotees in your calling list</p></div>';
+      return;
+    }
+
+    const { statusMap, changedSet } = await DB.getCallingHistoryTab(
+      weeks, AppState.userId, AppState.userName
+    );
+
+    // Week column headers
+    const weekHeaders = weeks.map(w => {
+      const label = new Date(w + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      return `<th style="text-align:center;min-width:72px;font-size:.73rem;white-space:nowrap">${label}</th>`;
+    }).join('');
+
+    const statusCell = (weekDate, devoteeId) => {
+      const entry = statusMap[weekDate]?.[devoteeId];
+      const changed = changedSet[weekDate]?.has(devoteeId);
+      if (!entry?.status) return `<td style="text-align:center;color:var(--text-muted);font-size:.72rem">—</td>`;
+      const s     = entry.status;
+      const short = _STATUS_SHORT[s] || s;
+      const color = _STATUS_COLOR[s] || 'var(--text-muted)';
+      const pencil = changed
+        ? `<i class="fas fa-pencil-alt" title="Updated after initial submission" style="font-size:.58rem;color:var(--warning);margin-left:.25rem;vertical-align:middle"></i>`
+        : '';
+      const tooltip = entry.reason ? _reasonLabel(entry.reason) : '';
+      return `<td style="text-align:center;padding:.35rem .3rem" title="${tooltip}">
+        <span style="font-size:.73rem;font-weight:600;color:${color};white-space:nowrap">${short}${pencil}</span>
+      </td>`;
+    };
+
+    // Group rows by team if superAdmin
+    let lastTeam = null;
+    const rows = devotees.map(d => {
+      let teamRow = '';
+      if (isSA && d.teamName !== lastTeam) {
+        lastTeam = d.teamName;
+        const span = 2 + weeks.length;
+        teamRow = `<tr style="background:var(--brand-subtle)">
+          <td colspan="${span}" style="font-weight:700;font-size:.75rem;padding:.3rem .6rem;color:var(--brand)">${teamBadge(d.teamName || 'No Team')}</td>
+        </tr>`;
+      }
+      return teamRow + `<tr>
+        <td style="font-weight:600;font-size:.82rem;padding:.35rem .5rem;white-space:nowrap">${d.name}</td>
+        ${isSA ? `<td style="padding:.35rem .3rem;font-size:.75rem;color:var(--text-muted)">${d.callingBy || '—'}</td>` : ''}
+        ${weeks.map(w => statusCell(w, d.id)).join('')}
+      </tr>`;
+    }).join('');
+
+    const callingByHeader = isSA ? `<th style="min-width:90px;font-size:.73rem">Calling By</th>` : '';
+
+    wrap.innerHTML = `
+      <div class="panel-header" style="padding:.75rem 1rem .5rem">
+        <h2 style="font-size:.95rem"><i class="fas fa-history"></i> Calling History
+          <span style="font-size:.72rem;color:var(--text-muted);font-weight:400;margin-left:.4rem">last 4 weeks</span>
+        </h2>
+        <span style="font-size:.72rem;color:var(--text-muted)">
+          <i class="fas fa-pencil-alt" style="color:var(--warning)"></i> = updated after initial submission
+        </span>
+      </div>
+      <div class="table-scroll" style="overflow-x:auto">
+        <table class="calling-table" style="min-width:420px;width:100%">
+          <thead><tr>
+            <th style="min-width:130px">Devotee</th>
+            ${callingByHeader}
+            ${weekHeaders}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+  } catch (e) {
+    console.error('loadCallingHistoryTab', e);
+    wrap.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load history</p></div>';
+  }
+}
+
+// Reload history tab when filters change (if active)
+document.addEventListener('filtersChanged', () => {
+  if (AppState._callingSubTab === 'history') loadCallingHistoryTab();
+});
+
 function switchCallingTab(tab, btn) {
   // Legacy no-op: Calling tab now shows only the calling list.
   _callingActiveTab = 'list';
@@ -344,9 +481,14 @@ function _renderCallingSubmitBar(week, existing) {
         ${latest ? `<span style="font-size:.75rem;color:var(--text-muted)"><i class="fas fa-redo"></i> Last update: ${latest}</span>` : ''}
         <span style="font-size:.75rem;color:var(--text-muted)"><i class="fas fa-pencil-alt"></i> You can still edit and re-submit for corrections. Original timestamp is locked.</span>
       </div>
-      <button class="btn btn-primary" style="padding:.35rem 1rem;font-size:.85rem;flex-shrink:0" onclick="doSubmitCallingWeek('${week}')">
-        <i class="fas fa-paper-plane"></i> Re-submit
-      </button>`;
+      <div style="display:flex;gap:.5rem;flex-shrink:0">
+        <button class="btn btn-secondary" style="padding:.35rem .75rem;font-size:.82rem" onclick="showCallingHistory('${week}')">
+          <i class="fas fa-history"></i> History
+        </button>
+        <button class="btn btn-primary" style="padding:.35rem 1rem;font-size:.85rem" onclick="doSubmitCallingWeek('${week}')">
+          <i class="fas fa-paper-plane"></i> Re-submit
+        </button>
+      </div>`;
   } else if (week) {
     bar.style.background  = '';
     bar.style.borderColor = '';
@@ -377,6 +519,88 @@ async function doSubmitCallingWeek(week) {
   } catch (_) {
     _renderCallingSubmitBar(week, { submittedAtClient: new Date().toISOString() });
   }
+}
+
+async function showCallingHistory(week) {
+  const entries = await DB.getCallingSubmitHistory(week, AppState.userId).catch(() => []);
+  if (!entries.length) { showToast('No history found for this week', 'info'); return; }
+
+  const devotees = await DevoteeCache.all().catch(() => []);
+  const nameOf = id => devotees.find(d => d.id === id)?.name || id;
+
+  const statusLabel = s => {
+    if (!s) return '<span style="color:var(--text-muted)">—</span>';
+    const col = s === 'Yes' ? 'var(--success)' : s === 'No' ? 'var(--danger)' : 'var(--text-muted)';
+    return `<span style="color:${col};font-weight:600">${s}</span>`;
+  };
+
+  // Build timeline: for each entry, diff against previous to highlight changes
+  let rows = '';
+  entries.forEach((entry, idx) => {
+    const dt = new Date(entry.submittedAtClient);
+    const timeStr = dt.toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', hour12:true });
+    const label = entry.isResubmit
+      ? `<span style="color:var(--warning);font-weight:700"><i class="fas fa-redo"></i> Re-submit #${idx}</span>`
+      : `<span style="color:var(--success);font-weight:700"><i class="fas fa-paper-plane"></i> First Submit</span>`;
+
+    const prev = idx > 0 ? entries[idx - 1].statusMap || {} : {};
+    const curr = entry.statusMap || {};
+
+    // Collect all devoteeIds across both snapshots
+    const allIds = [...new Set([...Object.keys(prev), ...Object.keys(curr)])];
+    const changed = allIds.filter(id => {
+      const p = prev[id] || {}; const c = curr[id] || {};
+      return p.status !== c.status || p.reason !== c.reason;
+    });
+
+    const changeRows = changed.map(id => {
+      const p = prev[id] || {}; const c = curr[id] || {};
+      const name = nameOf(id);
+      const reasonDiff = c.reason && c.reason !== p.reason
+        ? `<span style="font-size:.72rem;color:var(--text-muted)"> (${_reasonLabel(c.reason)})</span>` : '';
+      return `<tr>
+        <td style="font-size:.8rem;padding:.3rem .5rem">${name}</td>
+        <td style="padding:.3rem .5rem">${statusLabel(p.status || '—')}</td>
+        <td style="padding:.3rem .5rem;color:var(--text-muted);font-size:.9rem">→</td>
+        <td style="padding:.3rem .5rem">${statusLabel(c.status || '—')}${reasonDiff}</td>
+      </tr>`;
+    }).join('');
+
+    rows += `
+      <div style="border-left:3px solid var(--brand);padding:.6rem .8rem;margin-bottom:.75rem;background:var(--brand-subtle);border-radius:0 var(--radius) var(--radius) 0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem">
+          ${label}
+          <span style="font-size:.75rem;color:var(--text-muted)">${timeStr}</span>
+        </div>
+        ${changed.length ? `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr>
+              <th style="text-align:left;font-size:.72rem;color:var(--text-muted);padding:.2rem .5rem">Devotee</th>
+              <th style="font-size:.72rem;color:var(--text-muted);padding:.2rem .5rem">Before</th>
+              <th style="padding:.2rem .5rem"></th>
+              <th style="font-size:.72rem;color:var(--text-muted);padding:.2rem .5rem">After</th>
+            </tr></thead>
+            <tbody>${changeRows}</tbody>
+          </table>` :
+          `<span style="font-size:.78rem;color:var(--text-muted)">${idx === 0 ? 'Initial submission — no previous data to compare.' : 'No status changes from previous submit.'}</span>`}
+      </div>`;
+  });
+
+  document.getElementById('_calling-history-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = '_calling-history-modal';
+  overlay.className = 'modal-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:520px;width:95vw">
+      <div class="modal-header">
+        <h2 style="font-size:1rem"><i class="fas fa-history"></i> Calling Submit History — ${new Date(week + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}</h2>
+        <button class="btn-icon close" onclick="document.getElementById('_calling-history-modal')?.remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <div style="overflow:auto;max-height:65vh;padding:.75rem">${rows}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  history.pushState(null, '', location.href);
 }
 
 const CALLING_REASONS = [

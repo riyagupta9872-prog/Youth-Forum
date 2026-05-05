@@ -93,13 +93,13 @@ async function loadDashboard() {
       }
     }
 
-    // Activity collections (Books, Services, Registrations, Donations) are
-    // date-stamped per entry. Use a 30-day window ending today (not on the
-    // session date) so entries logged on any day reliably show up — narrower
-    // session-aligned windows accidentally hid logs that lived a few days off.
-    const activityEnd   = today;
-    const activityStart = (() => {
-      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 30);
+    // Activity window = the session week: from session Sunday → the following Saturday.
+    // This matches how coordinators log — services, books, registrations are
+    // entered for the week of that Sunday class.
+    const activityStart = sessionDate || today;
+    const activityEnd   = (() => {
+      const d = new Date(activityStart + 'T00:00:00');
+      d.setDate(d.getDate() + 6);
       return d.toISOString().slice(0, 10);
     })();
 
@@ -1435,6 +1435,120 @@ async function loadYearlySheet() {
   } catch (e) {
     console.error('loadYearlySheet', e);
     wrap.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
+  }
+}
+
+// ══ ATTENDANCE ACCURACY REPORT ══════════════════════════════════════════════
+async function loadAttAccuracyReport() {
+  const el = document.getElementById('att-accuracy-content');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
+  try {
+    const sessionId = AppState.currentSessionId;
+    if (!sessionId) {
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-alt"></i><p>No session selected</p></div>';
+      return;
+    }
+    const [sessSnap, cfgSnap] = await Promise.all([
+      fdb.collection('sessions').doc(sessionId).get(),
+      fdb.collection('settings').doc('callingWeek').get(),
+    ]);
+    const sessionDate = sessSnap.exists ? sessSnap.data().sessionDate : sessionId;
+    const cfg = cfgSnap.exists ? cfgSnap.data() : null;
+    let callingDate;
+    if (cfg?.sessionDate === sessionDate && cfg.callingDate) {
+      callingDate = cfg.callingDate;
+    } else {
+      const d = new Date(sessionDate + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      callingDate = d.toISOString().slice(0, 10);
+    }
+    const report = await DB.getCallingReport(callingDate);
+    const teams  = Object.keys(report).filter(k => !k.startsWith('_'));
+    if (!teams.length) {
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i><p>No calling data for this session</p></div>';
+      return;
+    }
+    if (!report._hasSession) {
+      const sd = new Date(sessionDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+      el.innerHTML = `<div class="empty-state"><i class="fas fa-clock"></i><p>Attendance not yet marked for ${sd}.<br>Accuracy report available after attendance is entered.</p></div>`;
+      return;
+    }
+    const weekLabel = new Date(callingDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+    let grandYes = 0, grandCame = 0, grandAbsent = 0, bodyRows = '';
+    teams.forEach(team => {
+      const t = report[team];
+      if (!t.yes && !t.yesAndCame && !t.yesNotCame) return;
+      grandYes += t.yes; grandCame += t.yesAndCame; grandAbsent += t.yesNotCame;
+      const teamAcc = t.yes > 0 ? Math.round(t.yesAndCame / t.yes * 100) : 0;
+      const teamAccStyle = `font-weight:700;color:${teamAcc>=80?'var(--success)':teamAcc>=50?'#f57f17':'#c62828'}`;
+      const teamAbsentCell = t.yesNotCame > 0
+        ? `<button class="acc-absent-btn" onclick='openAbsentModal("${callingDate}",null,"${team.replace(/"/g,'&quot;')}")'>${t.yesNotCame}</button>`
+        : `<span style="color:var(--text-muted)">0</span>`;
+      bodyRows += `<tr style="background:var(--accent-light);font-weight:700;font-size:.83rem">
+        <td>${teamBadge(team)}</td>
+        <td style="text-align:center">${t.yes}</td>
+        <td style="text-align:center;color:var(--success)">${t.yesAndCame}</td>
+        <td style="text-align:center">${teamAbsentCell}</td>
+        <td style="${teamAccStyle}">${teamAcc}%</td>
+      </tr>`;
+      const sortedCallers = Object.entries(t.callers).sort(([,a],[,b]) => (a.isCoordinator&&!b.isCoordinator)?-1:(!a.isCoordinator&&b.isCoordinator)?1:0);
+      sortedCallers.forEach(([caller, s]) => {
+        if (!s.submitted) {
+          bodyRows += `<tr style="font-size:.8rem;background:#fff8e1">
+            <td style="padding-left:1.4rem;color:var(--text-muted)">${caller}</td>
+            <td colspan="4" style="color:#c62828;font-size:.78rem"><i class="fas fa-clock"></i> Not Submitted — accuracy unavailable</td>
+          </tr>`;
+          return;
+        }
+        const callerAcc = s.yes > 0 ? Math.round(s.yesAndCame / s.yes * 100) : null;
+        const callerAccStyle = callerAcc === null ? 'color:var(--text-muted)' : `color:${callerAcc>=80?'var(--success)':callerAcc>=50?'#f57f17':'#c62828'}`;
+        const callerAbsentCell = s.yesNotCame > 0
+          ? `<button class="acc-absent-btn" onclick='openAbsentModal("${callingDate}","${caller.replace(/"/g,'&quot;')}","${team.replace(/"/g,'&quot;')}")'>${s.yesNotCame}</button>`
+          : `<span style="color:var(--text-muted)">0</span>`;
+        bodyRows += `<tr style="font-size:.82rem">
+          <td style="padding-left:1.4rem;color:var(--text-muted)">${caller}</td>
+          <td style="text-align:center">${s.yes}</td>
+          <td style="text-align:center;color:var(--success)">${s.yesAndCame}</td>
+          <td style="text-align:center">${callerAbsentCell}</td>
+          <td style="text-align:center;${callerAccStyle}">${callerAcc !== null ? callerAcc + '%' : '—'}</td>
+        </tr>`;
+      });
+    });
+    const grandAcc = grandYes > 0 ? Math.round(grandCame / grandYes * 100) : 0;
+    const grandAbsentCell = grandAbsent > 0
+      ? `<button class="acc-absent-btn" onclick='openAbsentModal("${callingDate}",null,null)'>${grandAbsent}</button>`
+      : `<span>0</span>`;
+    const grandAccStyle = `color:${grandAcc>=80?'var(--success)':grandAcc>=50?'#f57f17':'#c62828'}`;
+    el.innerHTML = `
+      <div style="font-size:.84rem;margin-bottom:.55rem">
+        <strong><i class="fas fa-bullseye"></i> Calling Accuracy — ${weekLabel}</strong>
+        <span style="margin-left:.65rem;font-size:.78rem;color:var(--text-muted)">Click an absent count to see who didn't come</span>
+      </div>
+      <div class="table-scroll">
+        <table class="calling-table cs-report-table" style="margin:0;min-width:360px">
+          <thead><tr>
+            <th style="min-width:120px">Team / Calling By</th>
+            <th style="text-align:center;min-width:46px;color:var(--success)">Said Yes</th>
+            <th style="text-align:center;min-width:40px;color:var(--success)">Came</th>
+            <th style="text-align:center;min-width:46px;color:var(--danger)">Absent</th>
+            <th style="text-align:center;min-width:52px">Accuracy %</th>
+          </tr></thead>
+          <tbody>
+            ${bodyRows || '<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:var(--text-muted)">No data for this session</td></tr>'}
+            <tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.83rem">
+              <td>Grand Total</td>
+              <td style="text-align:center">${grandYes}</td>
+              <td style="text-align:center">${grandCame}</td>
+              <td style="text-align:center">${grandAbsentCell}</td>
+              <td style="text-align:center;${grandAccStyle}">${grandAcc}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    console.error('loadAttAccuracyReport', e);
+    el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load accuracy report</p></div>';
   }
 }
 

@@ -154,7 +154,7 @@ const DB = {
     if (!doc.exists) throw new Error('Not found');
     const ex = doc.data();
     const updates = { ...toCamel(formData), updatedAt: TS() };
-    const trackMap = { name:'name', mobile:'mobile', chantingRounds:'chanting_rounds', kanthi:'kanthi', gopiDress:'gopi_dress', teamName:'team_name', devoteeStatus:'devotee_status', facilitator:'facilitator', referenceBy:'reference_by', callingBy:'calling_by' };
+    const trackMap = { name:'name', mobile:'mobile', chantingRounds:'chanting_rounds', kanthi:'kanthi', gopiDress:'gopi_dress', teamName:'team_name', devoteeStatus:'devotee_status', facilitator:'facilitator', referenceBy:'reference_by', callingBy:'calling_by', remarks:'remarks' };
     const batch = fdb.batch();
     Object.entries(trackMap).forEach(([fKey, formKey]) => {
       const nv = updates[fKey], ov = ex[fKey];
@@ -693,7 +693,29 @@ const DB = {
     const now = new Date().toISOString();
     const docRef = fdb.collection('callingSubmissions').doc(docId);
     const existing = await docRef.get();
-    if (existing.exists && existing.data().initialSubmittedAtClient) {
+    const isResubmit = existing.exists && !!existing.data().initialSubmittedAtClient;
+
+    // Snapshot current calling statuses for this user's devotees this week
+    const statusSnap = await fdb.collection('callingStatus')
+      .where('weekDate', '==', weekDate).get();
+    const myStatuses = statusSnap.docs
+      .map(d => d.data())
+      .filter(s => {
+        // include statuses for devotees whose callingBy matches this user
+        return true; // filtered by userName after cache lookup
+      });
+    // Build a lightweight snapshot: devoteeId → {status, reason}
+    const statusMap = {};
+    statusSnap.docs.forEach(d => {
+      const s = d.data();
+      statusMap[s.devoteeId] = {
+        status: s.comingStatus || '',
+        reason: s.callingReason || '',
+        notes:  s.callingNotes  || '',
+      };
+    });
+
+    if (isResubmit) {
       await docRef.update({
         weekDate, userId, userName, teamName: teamName || '',
         submittedAt: TS(), submittedAtClient: now,
@@ -705,6 +727,68 @@ const DB = {
         initialSubmittedAt: TS(), initialSubmittedAtClient: now,
       });
     }
+
+    // Always save a history entry so we have a full audit trail of every submit
+    await docRef.collection('history').add({
+      submittedAtClient: now,
+      submittedAt: TS(),
+      isResubmit,
+      statusMap,
+    });
+  },
+
+  // Returns statusMap[weekDate][devoteeId] and changedSet[weekDate] (devoteeIds changed after submit)
+  async getCallingHistoryTab(weeks, userId, userName) {
+    // 1. All calling statuses for these weeks in one query
+    const statusSnap = await fdb.collection('callingStatus')
+      .where('weekDate', 'in', weeks).get();
+
+    const statusMap = {};
+    weeks.forEach(w => { statusMap[w] = {}; });
+    statusSnap.docs.forEach(d => {
+      const s = d.data();
+      if (statusMap[s.weekDate]) {
+        statusMap[s.weekDate][s.devoteeId] = {
+          status:          s.comingStatus   || '',
+          reason:          s.callingReason  || '',
+          updatedAtClient: s.updatedAtClient || null,
+        };
+      }
+    });
+
+    // 2. Per-week submission docs to get initialSubmittedAtClient
+    //    For superAdmin we fetch all submitters; for others just own doc.
+    const submitMap = {}; // weekDate → { devoteeId → initialSubmittedAtClient }
+    weeks.forEach(w => { submitMap[w] = null; });
+
+    await Promise.all(weeks.map(async w => {
+      // My own submission
+      const docId = `${userId}_${w}`;
+      const doc = await fdb.collection('callingSubmissions').doc(docId).get();
+      if (doc.exists) submitMap[w] = doc.data().initialSubmittedAtClient || null;
+    }));
+
+    // 3. Build changedSet: devoteeIds whose callingStatus was updated AFTER initial submit
+    const changedSet = {};
+    weeks.forEach(w => {
+      changedSet[w] = new Set();
+      const initTime = submitMap[w];
+      if (!initTime) return;
+      Object.entries(statusMap[w]).forEach(([devoteeId, s]) => {
+        if (s.updatedAtClient && s.updatedAtClient > initTime) {
+          changedSet[w].add(devoteeId);
+        }
+      });
+    });
+
+    return { statusMap, changedSet };
+  },
+
+  async getCallingSubmitHistory(weekDate, userId) {
+    const docId = `${userId}_${weekDate}`;
+    const snap = await fdb.collection('callingSubmissions').doc(docId)
+      .collection('history').orderBy('submittedAtClient', 'asc').get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
   async getCallingSubmissions(weekDates) {
