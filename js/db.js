@@ -974,34 +974,40 @@ const DB = {
       const members = active.filter(d => d.teamName === team);
       if (!members.length) return;
       const callers = [...new Set(members.map(d => d.callingBy).filter(Boolean))].sort();
-      result[team] = { total: members.length, ...zeroStats(), callers: {} };
+      result[team] = { total: members.length, ...zeroStats(), unsubmittedTotal: 0, callers: {} };
       callers.forEach(caller => {
         const sub = members.filter(d => d.callingBy === caller);
         const submitted = submittedCallers.has(caller);
         const s = { total: sub.length, ...zeroStats(), submitted, unsubmittedTotal: 0 };
-        sub.forEach(d => {
-          const cs = csMap[d.id];
-          const came = attSet.has(d.id);
-          if (came) s.came++;
-          if (!submitted) {
-            // Unsubmitted caller: ALL their devotees are "not called"
-            s.notCalled++;
-            return;
-          }
-          // Submitted caller: blank comingStatus = not called
-          if (!cs || !cs.comingStatus) { s.notCalled++; return; }
-          s.called++;
-          if (cs.comingStatus === 'Yes') { s.yes++; came ? s.yesAndCame++ : s.yesNotCame++; }
-          else if (cs.callingReason === 'online_class' || cs.comingStatus === 'Shift') { s.online++; }
-          else if (cs.callingReason === 'festival_calling') { s.festival++; }
-          else if (cs.callingReason === 'not_interested_now') { s.notInterested++; }
-        });
-        if (!submitted) s.unsubmittedTotal = sub.length;
+
+        if (!submitted) {
+          // Submission is the trigger — unsubmitted callers are excluded from all counts.
+          // Their devotees are shown in the report with a "Not Submitted" row but do NOT
+          // contribute to notCalled or any other stat.
+          s.unsubmittedTotal = sub.length;
+        } else {
+          sub.forEach(d => {
+            const cs = csMap[d.id];
+            const came = attSet.has(d.id);
+            if (came) s.came++;
+            // "Called" = any comingStatus OR callingReason set (attempt was made, even if person couldn't come).
+            // "Not Called" = completely blank (no attempt at all).
+            if (!cs || (!cs.comingStatus && !cs.callingReason)) { s.notCalled++; return; }
+            s.called++;
+            if (cs.comingStatus === 'Yes') { s.yes++; came ? s.yesAndCame++ : s.yesNotCame++; }
+            else if (cs.callingReason === 'online_class' || cs.comingStatus === 'Shift') { s.online++; }
+            else if (cs.callingReason === 'festival_calling') { s.festival++; }
+            else if (cs.callingReason === 'not_interested_now') { s.notInterested++; }
+          });
+        }
+
         s.isCoordinator = userRoleMap[caller]?.role === 'teamAdmin';
         s.position = s.isCoordinator ? 'Coordinator' : (userRoleMap[caller]?.position || 'Calling Facilitator');
         result[team].callers[caller] = s;
-        // Roll up ALL callers — unsubmitted contribute their notCalled count too
-        STAT_KEYS.forEach(k => { result[team][k] += s[k]; });
+        // Only submitted callers roll up to team totals
+        if (submitted) STAT_KEYS.forEach(k => { result[team][k] += s[k]; });
+        // Track unsubmitted separately on the team object
+        result[team].unsubmittedTotal += s.unsubmittedTotal;
       });
     });
     return result;

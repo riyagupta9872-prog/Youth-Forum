@@ -627,28 +627,26 @@ function _reasonNeedsDate(r) {
 }
 
 function renderCallingStats(devotees) {
-  const submitted = AppState._submittedCallers; // Set of caller names who submitted
-  const yes       = devotees.filter(d => d.coming_status === 'Yes').length;
-  const reached   = devotees.filter(d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason)).length;
-  const unavail   = devotees.filter(d => ['out_of_station','exams'].includes(d.calling_reason)).length;
-  const online    = devotees.filter(d => d.calling_reason === 'online_class').length;
-  const festival  = devotees.filter(d => d.calling_reason === 'festival_calling').length;
-  const notInt    = devotees.filter(d => d.calling_reason === 'not_interested_now').length;
-  // "Not called" = blank status AND (no submission info available OR caller didn't submit
-  // OR caller submitted but left this devotee with no status).
-  const uncalled  = devotees.filter(d => {
-    if (submitted && submitted.size > 0 && d.calling_by && !submitted.has(d.calling_by)) return true; // unsubmitted caller = all their devotees
-    return !d.coming_status && !d.calling_reason && !d.calling_notes;
-  }).length;
-  // Each pill is clickable → opens a modal listing the devotees in that bucket.
+  // Stats show the LIVE status from the calling list — no submission gating here.
+  // Submission gating only applies to reports (weekly report, accuracy, etc.).
+  // "Called" = any status or reason set (attempt was made, outcome whatever)
+  // "Not Called" = completely blank (no attempt at all)
+  const yes      = devotees.filter(d => d.coming_status === 'Yes').length;
+  const reached  = devotees.filter(d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason)).length;
+  const unavail  = devotees.filter(d => ['out_of_station','exams'].includes(d.calling_reason)).length;
+  const online   = devotees.filter(d => d.calling_reason === 'online_class').length;
+  const festival = devotees.filter(d => d.calling_reason === 'festival_calling').length;
+  const notInt   = devotees.filter(d => d.calling_reason === 'not_interested_now').length;
+  const uncalled = devotees.filter(d => !d.coming_status && !d.calling_reason && !d.calling_notes).length;
+
   document.getElementById('calling-stats').innerHTML = `
-    <button class="calling-stat" onclick="openCallingStatList('confirmed')"     title="Click to see who confirmed"><i class="fas fa-check-circle" style="color:var(--success)"></i> <strong>${yes}</strong> Confirmed</button>
-    <button class="calling-stat" onclick="openCallingStatList('not_reached')"   title="Click to see who couldn't be reached"><i class="fas fa-phone-slash" style="color:var(--danger)"></i> <strong>${reached}</strong> Not reached</button>
-    <button class="calling-stat" onclick="openCallingStatList('unavailable')"   title="Click to see who is unavailable"><i class="fas fa-calendar-times" style="color:#7b5ea7"></i> <strong>${unavail}</strong> Unavailable</button>
-    <button class="calling-stat" onclick="openCallingStatList('online')"        title="Click to see online class devotees"><i class="fas fa-laptop" style="color:#0288d1"></i> <strong>${online}</strong> Online</button>
-    ${festival ? `<button class="calling-stat" onclick="openCallingStatList('festival')" title="Click to see festival calling list"><i class="fas fa-star-and-crescent" style="color:#f57f17"></i> <strong>${festival}</strong> Festival</button>` : ''}
-    ${notInt ? `<button class="calling-stat" onclick="openCallingStatList('not_interested')" title="Click to see Not Interested (this week)"><i class="fas fa-ban" style="color:var(--danger)"></i> <strong>${notInt}</strong> Not Interested</button>` : ''}
-    <button class="calling-stat" onclick="openCallingStatList('uncalled')"      title="Click to see who hasn't been called yet"><i class="fas fa-circle-notch" style="color:var(--text-muted)"></i> <strong>${uncalled}</strong> Not called</button>`;
+    <button class="calling-stat" onclick="openCallingStatList('confirmed')"     title="Confirmed coming"><i class="fas fa-check-circle" style="color:var(--success)"></i> <strong>${yes}</strong> Confirmed</button>
+    <button class="calling-stat" onclick="openCallingStatList('not_reached')"   title="Called but couldn't reach"><i class="fas fa-phone-slash" style="color:var(--danger)"></i> <strong>${reached}</strong> Not reached</button>
+    <button class="calling-stat" onclick="openCallingStatList('unavailable')"   title="Called — unavailable (exams/OOS)"><i class="fas fa-calendar-times" style="color:#7b5ea7"></i> <strong>${unavail}</strong> Unavailable</button>
+    <button class="calling-stat" onclick="openCallingStatList('online')"        title="Shifted to online class"><i class="fas fa-laptop" style="color:#0288d1"></i> <strong>${online}</strong> Online</button>
+    ${festival ? `<button class="calling-stat" onclick="openCallingStatList('festival')" title="Festival calling list"><i class="fas fa-star-and-crescent" style="color:#f57f17"></i> <strong>${festival}</strong> Festival</button>` : ''}
+    ${notInt ? `<button class="calling-stat" onclick="openCallingStatList('not_interested')" title="Not interested this week"><i class="fas fa-ban" style="color:var(--danger)"></i> <strong>${notInt}</strong> Not Interested</button>` : ''}
+    <button class="calling-stat" onclick="openCallingStatList('uncalled')"      title="No calling attempt made yet"><i class="fas fa-circle-notch" style="color:var(--text-muted)"></i> <strong>${uncalled}</strong> Not called</button>`;
 }
 
 function filterCallingList() {
@@ -963,14 +961,19 @@ async function _loadCallingSummary(week, el) {
     let gTotal=0, gCalled=0, gNC=0, gYes=0, gOnline=0, gFestival=0, gNI=0;
     let bodyRows = '';
 
+    let gUnsubmitted = 0;
     teams.forEach((team, ti) => {
       const t = report[team];
+      const unsub = t.unsubmittedTotal || 0;
       gTotal += t.total; gCalled += t.called; gNC += t.notCalled;
       gYes += t.yes; gOnline += (t.online||0); gFestival += (t.festival||0); gNI += (t.notInterested||0);
+      gUnsubmitted += unsub;
 
       const teamId = 'team-' + ti;
-      // Unsubmitted callers' rows are highlighted; their devotees are already in notCalled
-      const ncCell = `<span style="color:#c62828">${t.notCalled}</span>`;
+      // Show unsubmitted callers' devotee count separately so admin sees pending data
+      const ncCell = unsub > 0
+        ? `<span style="color:#c62828">${t.notCalled}</span> <span style="color:#e65100;font-size:.72rem" title="${unsub} from callers who haven't submitted">+${unsub}⏳</span>`
+        : `<span style="color:#c62828">${t.notCalled}</span>`;
 
       // Team header row — clickable to expand/collapse facilitators
       bodyRows += `<tr class="cs-team-row" data-team-id="${teamId}" style="background:var(--accent-light);font-weight:700;font-size:.83rem;cursor:pointer" onclick="_toggleCSReportTeam('${teamId}', this)">
@@ -1042,7 +1045,7 @@ async function _loadCallingSummary(week, el) {
           <td colspan="2">Grand Total</td>
           <td style="text-align:center">${gTotal}</td>
           <td style="text-align:center">${gCalled}</td>
-          <td style="text-align:center">${gNC}</td>
+          <td style="text-align:center">${gNC}${gUnsubmitted > 0 ? ` <span style="font-size:.72rem;color:#ffcc80" title="${gUnsubmitted} pending from unsubmitted callers">+${gUnsubmitted}⏳</span>` : ''}</td>
           <td style="text-align:center">${gYes}</td>
           <td style="text-align:center">${gOnline}</td>
           <td style="text-align:center">${gFestival}</td>
@@ -1416,13 +1419,13 @@ function openCallingStatList(type) {
     return true;
   });
   const map = {
-    confirmed:      { title: '✓ Confirmed Coming',          icon: 'fas fa-check-circle',  color: 'var(--success)', filter: d => d.coming_status === 'Yes' },
-    not_reached:    { title: 'Not Reached',                  icon: 'fas fa-phone-slash',   color: 'var(--danger)',  filter: d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason) },
-    unavailable:    { title: 'Temporarily Unavailable',      icon: 'fas fa-calendar-times',color: '#7b5ea7',        filter: d => ['out_of_station','exams'].includes(d.calling_reason) },
-    online:         { title: 'Online Class (this week)',     icon: 'fas fa-laptop',        color: '#0288d1',        filter: d => d.calling_reason === 'online_class' },
-    festival:       { title: 'Festival Calling',             icon: 'fas fa-star-and-crescent', color: '#f57f17',    filter: d => d.calling_reason === 'festival_calling' },
-    not_interested: { title: 'Not Interested (this week)',   icon: 'fas fa-ban',           color: 'var(--danger)',  filter: d => d.calling_reason === 'not_interested_now' },
-    uncalled:       { title: 'Not Called Yet',               icon: 'fas fa-circle-notch',  color: 'var(--text-muted)', filter: d => !d.coming_status && !d.calling_reason && !d.calling_notes },
+    confirmed:      { title: '✓ Confirmed Coming',          icon: 'fas fa-check-circle',      color: 'var(--success)',    filter: d => d.coming_status === 'Yes' },
+    not_reached:    { title: 'Called — Not Reached',         icon: 'fas fa-phone-slash',        color: 'var(--danger)',     filter: d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason) },
+    unavailable:    { title: 'Called — Unavailable',         icon: 'fas fa-calendar-times',     color: '#7b5ea7',           filter: d => ['out_of_station','exams'].includes(d.calling_reason) },
+    online:         { title: 'Shifted to Online Class',      icon: 'fas fa-laptop',             color: '#0288d1',           filter: d => d.calling_reason === 'online_class' },
+    festival:       { title: 'Festival Calling',             icon: 'fas fa-star-and-crescent',  color: '#f57f17',           filter: d => d.calling_reason === 'festival_calling' },
+    not_interested: { title: 'Not Interested (this week)',   icon: 'fas fa-ban',                color: 'var(--danger)',     filter: d => d.calling_reason === 'not_interested_now' },
+    uncalled:       { title: 'Not Called — No Attempt Yet',  icon: 'fas fa-circle-notch',       color: 'var(--text-muted)', filter: d => !d.coming_status && !d.calling_reason && !d.calling_notes },
   };
   const cfg = map[type];
   if (!cfg) return;
