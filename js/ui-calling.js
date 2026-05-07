@@ -341,14 +341,17 @@ async function loadCallingStatus() {
 
     window._beforeCallingDate = beforeCallingDate;
 
-    const [devotees, mySubmission] = await Promise.all([
+    const [devotees, mySubmission, submSnap] = await Promise.all([
       DB.getCallingStatus(week),
-      _callingLocked ? Promise.resolve(null) : DB.getMyCallingSubmission(week, AppState.userId).catch(() => null)
+      _callingLocked ? Promise.resolve(null) : DB.getMyCallingSubmission(week, AppState.userId).catch(() => null),
+      fdb.collection('callingSubmissions').where('weekDate', '==', week).get().catch(() => null),
     ]);
     AppState.callingData = devotees;
-
-    // Team / Calling By dropdowns moved to the master filter bar — nothing to
-    // populate locally on this tab any more.
+    // Store which callers have submitted so renderCallingStats can apply the
+    // "unsubmitted caller = all devotees are not called" rule consistently.
+    AppState._submittedCallers = new Set(
+      (submSnap?.docs || []).map(d => d.data().userName).filter(Boolean)
+    );
 
     renderCallingStats(devotees);
     if (AppState.userRole === 'superAdmin') {
@@ -624,13 +627,19 @@ function _reasonNeedsDate(r) {
 }
 
 function renderCallingStats(devotees) {
+  const submitted = AppState._submittedCallers; // Set of caller names who submitted
   const yes       = devotees.filter(d => d.coming_status === 'Yes').length;
   const reached   = devotees.filter(d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason)).length;
   const unavail   = devotees.filter(d => ['out_of_station','exams'].includes(d.calling_reason)).length;
   const online    = devotees.filter(d => d.calling_reason === 'online_class').length;
   const festival  = devotees.filter(d => d.calling_reason === 'festival_calling').length;
   const notInt    = devotees.filter(d => d.calling_reason === 'not_interested_now').length;
-  const uncalled  = devotees.filter(d => !d.coming_status && !d.calling_reason && !d.calling_notes).length;
+  // "Not called" = blank status AND (no submission info available OR caller didn't submit
+  // OR caller submitted but left this devotee with no status).
+  const uncalled  = devotees.filter(d => {
+    if (submitted && submitted.size > 0 && d.calling_by && !submitted.has(d.calling_by)) return true; // unsubmitted caller = all their devotees
+    return !d.coming_status && !d.calling_reason && !d.calling_notes;
+  }).length;
   // Each pill is clickable → opens a modal listing the devotees in that bucket.
   document.getElementById('calling-stats').innerHTML = `
     <button class="calling-stat" onclick="openCallingStatList('confirmed')"     title="Click to see who confirmed"><i class="fas fa-check-circle" style="color:var(--success)"></i> <strong>${yes}</strong> Confirmed</button>
@@ -952,24 +961,16 @@ async function _loadCallingSummary(week, el) {
     }
     const weekLabel = formatDate(week);
     let gTotal=0, gCalled=0, gNC=0, gYes=0, gOnline=0, gFestival=0, gNI=0;
-    let gUnsubmitted = 0;
     let bodyRows = '';
 
     teams.forEach((team, ti) => {
       const t = report[team];
-      const unsub = t.unsubmittedTotal || 0;
-      // "Effective Not Called" = devotees not recorded by submitted callers
-      //                        + ALL devotees in lists of callers who never submitted
-      const effNC = t.notCalled + unsub;
-      gTotal += t.total; gCalled += t.called; gNC += effNC;
+      gTotal += t.total; gCalled += t.called; gNC += t.notCalled;
       gYes += t.yes; gOnline += (t.online||0); gFestival += (t.festival||0); gNI += (t.notInterested||0);
-      gUnsubmitted += unsub;
 
       const teamId = 'team-' + ti;
-      // Build "Not Called" cell — show unsubmitted portion separately
-      const ncCell = unsub > 0
-        ? `<span style="color:#c62828">${t.notCalled}</span><span style="color:#e65100;font-size:.72rem;margin-left:.2rem" title="${unsub} from unsubmitted callers">+${unsub}⚠</span>`
-        : `<span style="color:#c62828">${t.notCalled}</span>`;
+      // Unsubmitted callers' rows are highlighted; their devotees are already in notCalled
+      const ncCell = `<span style="color:#c62828">${t.notCalled}</span>`;
 
       // Team header row — clickable to expand/collapse facilitators
       bodyRows += `<tr class="cs-team-row" data-team-id="${teamId}" style="background:var(--accent-light);font-weight:700;font-size:.83rem;cursor:pointer" onclick="_toggleCSReportTeam('${teamId}', this)">
@@ -1041,7 +1042,7 @@ async function _loadCallingSummary(week, el) {
           <td colspan="2">Grand Total</td>
           <td style="text-align:center">${gTotal}</td>
           <td style="text-align:center">${gCalled}</td>
-          <td style="text-align:center">${gNC}${gUnsubmitted > 0 ? `<span style="font-size:.72rem;color:#ffcc80;font-weight:400;margin-left:.3rem">(incl. ${gUnsubmitted} unsubmitted)</span>` : ''}</td>
+          <td style="text-align:center">${gNC}</td>
           <td style="text-align:center">${gYes}</td>
           <td style="text-align:center">${gOnline}</td>
           <td style="text-align:center">${gFestival}</td>

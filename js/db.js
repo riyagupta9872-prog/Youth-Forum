@@ -397,7 +397,7 @@ const DB = {
     allDevotees.forEach(d => {
       if (d.dateOfJoining === sessionDate && d.isActive !== false) flaggedIds.add(d.id);
     });
-    return { confirmed, present, newDevotees: flaggedIds.size, totalPresent: present };
+    return { confirmed, present, newDevotees: flaggedIds.size, totalPresent: present + flaggedIds.size };
   },
 
   /* ATTENDANCE */
@@ -643,19 +643,28 @@ const DB = {
   },
 
   async getCallingHistory(devoteeId, weeksBefore = 2) {
-    const weeks = [];
+    // Build pairs of { sessionDate (Sunday, for display), callingDate (Saturday, for Firestore query) }
+    const pairs = [];
     const d = new Date(); const day = d.getDay();
-    d.setDate(d.getDate() - day);
+    d.setDate(d.getDate() - day); // most recent Sunday
     for (let i = 0; i < weeksBefore; i++) {
-      weeks.push(d.toISOString().split('T')[0]);
+      const sun = new Date(d);
+      const sat = new Date(d); sat.setDate(d.getDate() - 1); // Saturday before this Sunday
+      pairs.push({
+        sessionDate: sun.toISOString().slice(0, 10),
+        callingDate: sat.toISOString().slice(0, 10),
+      });
       d.setDate(d.getDate() - 7);
     }
-    const snaps = await Promise.all(weeks.map(w =>
-      fdb.collection('callingStatus').where('devoteeId', '==', devoteeId).where('weekDate', '==', w).limit(1).get()
+    const snaps = await Promise.all(pairs.map(p =>
+      fdb.collection('callingStatus').where('devoteeId', '==', devoteeId).where('weekDate', '==', p.callingDate).limit(1).get()
     ));
-    return weeks.map((w, i) => {
+    return pairs.map((p, i) => {
       const doc = snaps[i].docs[0];
-      return doc ? { weekDate: w, ...doc.data(), id: doc.id } : { weekDate: w, comingStatus: null };
+      // Display the Sunday (session date) to the user, but data comes from Saturday record
+      return doc
+        ? { weekDate: p.sessionDate, ...doc.data(), id: doc.id }
+        : { weekDate: p.sessionDate, comingStatus: null };
     });
   },
 
@@ -969,25 +978,30 @@ const DB = {
       callers.forEach(caller => {
         const sub = members.filter(d => d.callingBy === caller);
         const submitted = submittedCallers.has(caller);
-        const s = { total: sub.length, ...zeroStats(), submitted };
-        if (submitted) {
-          sub.forEach(d => {
-            const cs = csMap[d.id];
-            const came = attSet.has(d.id);
-            if (came) s.came++;
-            if (!cs) { s.notCalled++; return; }
-            s.called++;
-            if (cs.comingStatus === 'Yes') { s.yes++; came ? s.yesAndCame++ : s.yesNotCame++; }
-            else if (cs.callingReason === 'online_class' || cs.comingStatus === 'Shift') { s.online++; }
-            else if (cs.callingReason === 'festival_calling') { s.festival++; }
-            else if (cs.callingReason === 'not_interested_now') { s.notInterested++; }
-          });
-        }
+        const s = { total: sub.length, ...zeroStats(), submitted, unsubmittedTotal: 0 };
+        sub.forEach(d => {
+          const cs = csMap[d.id];
+          const came = attSet.has(d.id);
+          if (came) s.came++;
+          if (!submitted) {
+            // Unsubmitted caller: ALL their devotees are "not called"
+            s.notCalled++;
+            return;
+          }
+          // Submitted caller: blank comingStatus = not called
+          if (!cs || !cs.comingStatus) { s.notCalled++; return; }
+          s.called++;
+          if (cs.comingStatus === 'Yes') { s.yes++; came ? s.yesAndCame++ : s.yesNotCame++; }
+          else if (cs.callingReason === 'online_class' || cs.comingStatus === 'Shift') { s.online++; }
+          else if (cs.callingReason === 'festival_calling') { s.festival++; }
+          else if (cs.callingReason === 'not_interested_now') { s.notInterested++; }
+        });
+        if (!submitted) s.unsubmittedTotal = sub.length;
         s.isCoordinator = userRoleMap[caller]?.role === 'teamAdmin';
         s.position = s.isCoordinator ? 'Coordinator' : (userRoleMap[caller]?.position || 'Calling Facilitator');
         result[team].callers[caller] = s;
-        // Roll up to team — only submitted callers contribute to the count
-        if (submitted) STAT_KEYS.forEach(k => { result[team][k] += s[k]; });
+        // Roll up ALL callers — unsubmitted contribute their notCalled count too
+        STAT_KEYS.forEach(k => { result[team][k] += s[k]; });
       });
     });
     return result;
