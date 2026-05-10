@@ -22,9 +22,11 @@ service cloud.firestore {
     match /callingStatus/{id}  { allow read, write: if isAuth(); }
     match /callingSubmissions/{id} { allow read, write: if isAuth(); }
     match /callingSubmissions/{id}/history/{histId} { allow read, write: if isAuth(); }
+    match /callingStatusChanges/{id}   { allow read, write: if isAuth(); }
     match /events/{id}         { allow read, write: if isAuth(); }
     match /eventDevotees/{id}  { allow read, write: if isAuth(); }
-    match /profileChanges/{id} { allow read, write: if isAuth(); }
+    match /profileChanges/{id}         { allow read, write: if isAuth(); }
+    match /personalMeetings/{id}       { allow read, write: if isAuth(); }
 
     // ── Activity logs (Books / Service / Registration / Donation) ─────────
     match /bookDistributions/{id} { allow read, write: if isAuth(); }

@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Youth Forum – Devotee Management</title>
+  <title>Sakhi Sang – Devotee Management</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Youth Forum">
-  <meta name="theme-color" content="#0369a1">
+  <meta name="apple-mobile-web-app-title" content="Sakhi Sang">
+  <meta name="theme-color" content="#1a5c3a">
 </head>
 <body>
 
@@ -22,8 +22,8 @@
 <div id="auth-screen" class="auth-screen">
   <div class="auth-card">
     <div class="auth-logo">
-      <img src="icon-192.png" alt="Youth Forum" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:0.75rem;box-shadow:0 4px 16px rgba(0,0,0,0.2)">
-      <h2>Youth Forum</h2>
+      <img src="icon-192.png" class="auth-om" alt="Sakhi Sang" style="width:66px;height:66px;border-radius:50%;object-fit:cover;box-shadow:0 8px 24px rgba(26,92,58,.35),0 2px 8px rgba(0,0,0,.15);display:block;margin-bottom:.22rem">
+      <h2>Sakhi Sang</h2>
       <p>Devotee Management System</p>
     </div>
     <div class="auth-tabs">
@@ -84,7 +84,9 @@
         <label>Your Team</label>
         <select id="signup-team">
           <option value="">Select Team</option>
-          <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+          <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+          <option>Lalita</option><option>Nilachal</option><option>Other</option>
+          <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
         </select>
       </div>
       <button type="submit" class="auth-btn"><i class="fas fa-user-plus"></i> Request Account</button>
@@ -146,9 +148,9 @@
       <span id="sidebar-badge" class="sidebar-badge hidden"></span>
     </button>
     <div class="header-logo">
-      <img src="icon-192.png" class="app-logo-img" alt="Youth Forum" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.4);box-shadow:0 2px 8px rgba(0,0,0,.25);display:block">
+      <img src="icon-192.png" class="app-logo-img" alt="Sakhi Sang" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.4);box-shadow:0 2px 8px rgba(0,0,0,.25);display:block">
       <div class="header-text">
-        <h1>Youth Forum</h1>
+        <h1>Sakhi Sang</h1>
         <p>Devotee Management System</p>
       </div>
     </div>
@@ -551,7 +553,7 @@
         <i class="fas fa-chart-bar"></i> Reports
       </button>
       <button id="calling-history-btn" class="att-sub-tab" onclick="switchCallingSubTab(this,'history')">
-        <i class="fas fa-history"></i> History
+        <i class="fas fa-history"></i> Calling History
       </button>
     </div>
 
@@ -600,7 +602,7 @@
       </div>
     </div>
 
-    <!-- ── REPORTS SUB-PANEL ── -->
+    <!-- ── REPORTS SUB-PANEL (was the standalone Reports tab → calling category) ── -->
     <div id="calling-panel-reports" class="att-sub-panel">
       <div id="reports-cat-calling" class="reports-cat-panel active">
         <div class="sub-tabs">
@@ -633,9 +635,11 @@
       </div>
     </div>
 
-    <!-- ── HISTORY SUB-PANEL ── -->
+    <!-- ── CALLING HISTORY PANEL ── -->
     <div id="calling-panel-history" class="att-sub-panel">
-      <div id="calling-history-grid-content"></div>
+      <div id="calling-history-grid-content">
+        <div class="empty-state"><i class="fas fa-history"></i><p>Loading…</p></div>
+      </div>
     </div>
 
   </section>
@@ -1155,7 +1159,9 @@
             <label>Team Name</label>
             <select id="f-team">
               <option value="">Select Team</option>
-              <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+              <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+              <option>Lalita</option><option>Nilachal</option><option>Other</option>
+              <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
             </select>
           </div>
           <div class="form-group">
@@ -1203,8 +1209,8 @@
             <input type="hidden" id="f-calling-by">
           </div>
           <div class="form-group full">
-            <label>Remarks <span class="field-hint">(internal notes — visible to coordinators &amp; above)</span></label>
-            <textarea id="f-remarks" rows="2" placeholder="Any observations, follow-up notes, special context…" style="resize:vertical"></textarea>
+            <label>Remarks <span class="field-hint">(coordinator notes about this devotee)</span></label>
+            <textarea id="f-remarks" rows="3" placeholder="Any special notes, follow-up reminders, or context about this devotee…" style="resize:vertical"></textarea>
           </div>
         </div>
       </div>
@@ -1757,7 +1763,9 @@
         <label>Team</label>
         <select id="edit-profile-team" class="form-control">
           <option value="">No Team</option>
-          <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+          <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+          <option>Lalita</option><option>Nilachal</option><option>Other</option>
+          <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
         </select>
         <div id="edit-profile-team-readonly" class="form-control" style="display:none;background:var(--accent-light);color:var(--text-muted);cursor:default"></div>
         <p id="edit-profile-team-note" style="font-size:.72rem;color:var(--text-muted);margin-top:.25rem;display:none">Contact Super Admin to change your team.</p>
@@ -1805,7 +1813,9 @@
       <div id="mgmt-team-picker" style="display:none;flex-direction:column;gap:.4rem">
         <select id="mgmt-new-team" class="form-control">
           <option value="">Select Team…</option>
-          <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+          <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+          <option>Lalita</option><option>Nilachal</option><option>Other</option>
+          <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
         </select>
         <button class="btn btn-primary" onclick="doMgmtAction('team_confirm')"><i class="fas fa-check"></i> Confirm Team Change</button>
       </div>
@@ -1863,7 +1873,9 @@
         <label>New Team</label>
         <select id="bulk-team">
           <option value="">— Select team —</option>
-          <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+          <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+          <option>Lalita</option><option>Nilachal</option><option>Other</option>
+          <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
         </select>
       </div>
       <div class="form-group" id="bulk-callingby-wrap" style="display:none">
@@ -2082,7 +2094,9 @@
         <label><i class="fas fa-users"></i> Team</label>
         <select id="ua-team">
           <option value="">No Team</option>
-          <option>Keshav</option><option>Madhav</option><option>Govind</option><option>Anant</option><option>Janardhana</option><option>Panchaal</option><option>Sanatana</option><option>Other</option>
+          <option>Champaklata</option><option>Chitralekha</option><option>Indulekha</option>
+          <option>Lalita</option><option>Nilachal</option><option>Other</option>
+          <option>Rangadevi</option><option>Sudevi</option><option>Tungavidya</option><option>Vishakha</option>
         </select>
       </div>
       <div class="form-group">

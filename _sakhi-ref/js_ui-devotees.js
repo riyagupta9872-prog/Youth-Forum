@@ -363,6 +363,7 @@ function clearDevoteeForm() {
   clearPicker('picker-facilitator', 'f-facilitator');
   clearPicker('picker-reference',   'f-reference');
   clearPicker('picker-calling-by',  'f-calling-by');
+  const fRem = document.getElementById('f-remarks'); if (fRem) fRem.value = '';
   clearFieldError('mobile');
   // Coordinators / facilitators who can only see their own team get that team
   // pre-filled instead of "Other".
@@ -402,7 +403,6 @@ async function populateEditForm(id) {
       }
     }
     if (d.calling_by) { document.getElementById('f-calling-by').value = d.calling_by; const pi = document.querySelector('#picker-calling-by .picker-input'); if(pi){pi.value=d.calling_by;pi.classList.add('has-value');} }
-    const fRemarks = document.getElementById('f-remarks'); if (fRemarks) fRemarks.value = d.remarks || '';
     document.getElementById('f-education').value          = d.education || '';
     document.getElementById('f-email').value              = d.email || '';
     document.getElementById('f-profession').value         = d.profession || '';
@@ -418,6 +418,7 @@ async function populateEditForm(id) {
     _toggleInstrumentField(d.plays_instrument || '');
     const fm = document.getElementById('f-family-members');    if(fm) fm.value = d.family_members || '';
     const fp = document.getElementById('f-family-participants'); if(fp) fp.value = d.family_participants || '';
+    const fr = document.getElementById('f-remarks');            if(fr) fr.value = d.remarks || '';
     clearFieldError('mobile');
   } catch (_) { showToast('Failed to load profile', 'error'); }
 }
@@ -454,7 +455,7 @@ function getFormPayload() {
                             : '',
     wants_kirtan_class:       document.getElementById('f-wants-kirtan').value,
     prior_sessions_attended:  parseInt(document.getElementById('f-prior-sessions')?.value) || 0,
-    remarks:                  document.getElementById('f-remarks')?.value.trim() || '',
+    remarks:                  (document.getElementById('f-remarks')?.value || '').trim(),
   };
 }
 
