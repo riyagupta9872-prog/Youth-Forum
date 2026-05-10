@@ -4,7 +4,28 @@
 const auth = firebase.auth();
 
 auth.onAuthStateChanged(async (user) => {
-  if (!user) { resetSession(); showAuthScreen(); return; }
+  if (!user) {
+    // ── Tear down live Firestore listeners so they don't fire for the next user
+    if (_signupReqUnsub) { _signupReqUnsub(); _signupReqUnsub = null; }
+    _signupReqCache = [];
+
+    // ── Full AppState wipe — prevents role / team / session data leaking to the
+    //    next account that logs in on the same browser tab.
+    Object.assign(AppState, {
+      userRole: null, userTeam: null, userPosition: null,
+      userName: '', userId: null, profilePic: null,
+      isAttSevaDev: false, _sessionExplicit: false,
+      _dashboard: null, _autoSnap: null,
+      callingData: [], attendanceCandidates: {}, sessionsCache: {},
+      filters: { sessionId: null, team: '', callingBy: '', period: 'session', periodAnchor: null },
+    });
+
+    // ── Bust the in-memory devotee cache so the next user re-fetches fresh
+    DevoteeCache.bust();
+
+    showAuthScreen();
+    return;
+  }
   AppState.userId = user.uid;
   try {
     let userDoc = await fdb.collection('users').doc(user.uid).get();
@@ -63,7 +84,13 @@ auth.onAuthStateChanged(async (user) => {
     applyRoleUI();
     await initApp();
     // Super admin only: keep a live count of pending sign-up requests.
-    if (AppState.userRole === 'superAdmin') subscribePendingSignups();
+    if (AppState.userRole === 'superAdmin') {
+      subscribePendingSignups();
+      // One-time data migrations — bust cache after so UI updates immediately
+      DB.migrateTeamNameOnce('Visakha', 'Vishakha').then(migrated => {
+        if (migrated) { DevoteeCache.bust(); if (typeof loadDashboard === 'function') loadDashboard(); }
+      }).catch(() => {});
+    }
   } catch (e) {
     if (e.code === 'permission-denied') {
       document.getElementById('auth-screen').classList.remove('hidden');
@@ -78,8 +105,29 @@ auth.onAuthStateChanged(async (user) => {
 
 function showAuthScreen() { document.getElementById('auth-screen').classList.remove('hidden'); }
 function hideAuthScreen() { document.getElementById('auth-screen').classList.add('hidden'); }
-function showPendingApprovalScreen() { document.getElementById('pending-approval-screen')?.classList.remove('hidden'); document.getElementById('auth-screen').classList.add('hidden'); }
-function hidePendingApprovalScreen() { document.getElementById('pending-approval-screen')?.classList.add('hidden'); }
+let _pendingApprovalUnsub = null;
+
+function showPendingApprovalScreen() {
+  document.getElementById('pending-approval-screen')?.classList.remove('hidden');
+  document.getElementById('auth-screen').classList.add('hidden');
+  // Watch users/{uid} in real-time — fires the moment super admin approves,
+  // so the user doesn't have to manually refresh to get in.
+  const uid = auth.currentUser?.uid;
+  if (uid && !_pendingApprovalUnsub) {
+    _pendingApprovalUnsub = fdb.collection('users').doc(uid).onSnapshot(doc => {
+      if (doc.exists && doc.data()?.status !== 'rejected') {
+        _pendingApprovalUnsub?.();
+        _pendingApprovalUnsub = null;
+        window.location.reload();
+      }
+    }, () => {});
+  }
+}
+function hidePendingApprovalScreen() {
+  document.getElementById('pending-approval-screen')?.classList.add('hidden');
+  _pendingApprovalUnsub?.();
+  _pendingApprovalUnsub = null;
+}
 
 function switchAuthTab(tab, btn) {
   document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
@@ -110,23 +158,50 @@ async function doLogin(e) {
   try {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (ex) {
-    err.textContent = ex.code === 'auth/wrong-password' || ex.code === 'auth/user-not-found'
-      ? 'Invalid email or password' : ex.message;
+    const badCred = ['auth/wrong-password','auth/user-not-found','auth/invalid-credential','auth/invalid-email'];
+    err.textContent = badCred.includes(ex.code) ? 'Invalid email or password' : ex.message;
     err.classList.add('show');
   }
 }
 
+let _signupBusy = false;
+
 async function doSignup(e) {
   e.preventDefault();
-  const err = document.getElementById('signup-error');
+  if (_signupBusy) return;           // block double-tap
+  _signupBusy = true;
+
+  const err    = document.getElementById('signup-error');
+  const btn    = document.querySelector('#signup-form button[type="submit"]');
+  const origTxt = btn?.innerHTML;
   err.classList.remove('show');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…'; }
+
   const name     = document.getElementById('signup-name').value.trim();
   const email    = document.getElementById('signup-email').value.trim();
   const password = document.getElementById('signup-password').value;
   const role     = document.getElementById('signup-role').value;
   const team     = document.getElementById('signup-team').value;
-  if (password.length < 6) { err.textContent = 'Password must be at least 6 characters'; err.classList.add('show'); return; }
+
+  const _resetBtn = () => {
+    _signupBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = origTxt; }
+  };
+
+  if (password.length < 6) {
+    err.textContent = 'Password must be at least 6 characters';
+    err.classList.add('show');
+    _resetBtn(); return;
+  }
   try {
+    // Check if this email already has a pending signup request to avoid duplicates
+    const dupCheck = await fdb.collection('signupRequests')
+      .where('email', '==', email).where('status', '==', 'pending').limit(1).get();
+    if (!dupCheck.empty) {
+      showPendingApprovalScreen();
+      _resetBtn(); return;
+    }
+
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await cred.user.updateProfile({ displayName: name });
     // First user EVER bootstraps as approved superAdmin. Everyone else lands
@@ -137,22 +212,23 @@ async function doSignup(e) {
       await fdb.collection('users').doc(cred.user.uid).set({
         email, name, role: 'superAdmin', teamName: null, createdAt: TS()
       });
-      return;  // onAuthStateChanged will pick them up as super admin
+      _resetBtn(); return;  // onAuthStateChanged will pick them up as super admin
     }
-    // Record the request and immediately sign them out — they'll see the
-    // "Awaiting approval" gate on next sign-in.
+    // Record the request — they'll see the "Awaiting approval" gate.
     await fdb.collection('signupRequests').doc(cred.user.uid).set({
-      uid:            cred.user.uid,
+      uid:           cred.user.uid,
       email, name,
-      requestedRole:  role,
-      requestedTeam:  team || null,
-      status:         'pending',
-      createdAt:      TS(),
+      requestedRole: role,
+      requestedTeam: team || null,
+      status:        'pending',
+      createdAt:     TS(),
     });
     showPendingApprovalScreen();
+    _resetBtn();
   } catch (ex) {
     err.textContent = ex.code === 'auth/email-already-in-use' ? 'Email already registered' : ex.message;
     err.classList.add('show');
+    _resetBtn();
   }
 }
 
@@ -188,54 +264,13 @@ async function doForgotPassword() {
 
 async function doLogout() {
   if (!confirm('Log out?')) return;
-  sessionStorage.removeItem('loginAsService');
-  resetSession();      // kill listeners + clear state before Firebase signs out
-  await auth.signOut();
-}
-
-// ── SESSION RESET (called on every logout / auth-null) ────────────────
-function resetSession() {
-  // 1. Kill all Firestore listeners
-  if (_signupReqUnsub) { _signupReqUnsub(); _signupReqUnsub = null; }
-  _signupReqCache = [];
-  _updateSignupBadges(0);
-
-  // 2. Bust devotee cache — next login always hits Firestore fresh
-  DevoteeCache.bust();
-
-  // 3. Reset all user-specific AppState
-  AppState.userRole     = null;
-  AppState.userTeam     = null;
-  AppState.userPosition = null;
-  AppState.userName     = '';
-  AppState.userId       = null;
-  AppState.profilePic   = null;
-  AppState.isAttSevaDev = false;
-  AppState.callingData  = [];
-  AppState.sessionsCache = {};
-  AppState.filters.team      = '';
-  AppState.filters.callingBy = '';
-  AppState.filters.sessionId = null;
-  AppState._currentSessionId       = null;
-  AppState._currentReportSessionId = null;
-
-  // 4. Wipe dynamic DOM containers so previous user's data is never visible
-  const wipe = id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; };
-  wipe('devotee-list');
-  wipe('calling-list');
-  wipe('dash-kpi-row');
-  wipe('home-greeting');
-
-  // 5. Close every open modal
-  document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
-
-  // 6. Clear filter ribbon chip values and reset chip active state
-  ['fr-session-value','fr-team-value','fr-by-value'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.textContent = '';
-  });
-  ['fr-chip-session','fr-chip-team','fr-chip-by'].forEach(id => {
-    document.getElementById(id)?.setAttribute('data-active','false');
-  });
+  sessionStorage.clear(); // wipe all session flags (loginAsService, etc.)
+  await auth.signOut();   // triggers onAuthStateChanged(null) which resets AppState + cache
+  // Hard reload after sign-out: the only guaranteed way to clear ALL module-level
+  // JS state (cache vars in analytics, calling, devotees, etc. across 5 files).
+  // onAuthStateChanged(null) already wiped AppState + DevoteeCache, so the page
+  // that loads will start completely clean.
+  location.reload();
 }
 
 // ── SIGN-UP REQUESTS (super admin) ─────────────────────
@@ -815,11 +850,14 @@ function applyRoleUI() {
     : (team ? `${team} - ${pos || 'Facilitator'}` : (pos || 'Facilitator'));
   pill.style.background = role === 'superAdmin' ? 'rgba(201,168,76,.5)' : role === 'teamAdmin' ? 'rgba(82,183,136,.4)' : 'rgba(82,183,136,.25)';
 
-  const isSA = role === 'superAdmin';
-  document.getElementById('admin-gear-btn')?.classList.toggle('hidden', !isSA);
-  document.getElementById('clear-data-btn')?.classList.toggle('hidden', !isSA);
+  // Always set both show AND hide — never rely on "was already hidden".
+  // If this runs after an account switch, elements must be explicitly
+  // shown or hidden for the NEW role, not left in the previous role's state.
+  const isSuper = role === 'superAdmin';
+  document.getElementById('admin-gear-btn')?.classList.toggle('hidden', !isSuper);
+  document.getElementById('clear-data-btn')?.classList.toggle('hidden', !isSuper);
   document.querySelectorAll('.super-admin-only').forEach(el => {
-    el.style.display = isSA ? '' : 'none';
+    el.style.display = isSuper ? '' : 'none';
   });
 
   // serviceDevotee (Facilitator) gets same tab access as teamAdmin — all team tabs
@@ -859,9 +897,35 @@ function applyRoleUI() {
     if (firstBtn && typeof switchTab === 'function') switchTab(firstAllowed, firstBtn);
   }
 
+  // Calling sub-tab button visibility by role:
+  // "Calls" = personal calling → teamAdmin + serviceDevotee only (superAdmin doesn't do personal calling)
+  // "Team Calling" = oversight view → teamAdmin + superAdmin only
+  document.getElementById('calling-calls-btn')?.classList.toggle('hidden', role === 'superAdmin');
+  document.getElementById('calling-team-btn')?.classList.toggle('hidden', role === 'serviceDevotee');
+
+  // Also update the dropdown menu items for the calling tab
+  ['tab-menu-calling', 'bnav-menu-calling'].forEach(menuId => {
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+    menu.querySelectorAll('.tab-menu-item').forEach(item => {
+      const view = item.dataset.view;
+      const entry = TAB_VIEWS.calling?.find(it => it.key === view);
+      if (entry?.roles) item.style.display = entry.roles.includes(role) ? '' : 'none';
+    });
+  });
+
+  // superAdmin opens Calling tab → land on Team Calling, not Calls
+  if (role === 'superAdmin' && AppState.currentTab === 'calling') {
+    applyTabView('calling', 'team-calling');
+  }
+
+  // Both directions: show for admin/coordinator, hide for serviceDevotee.
+  // Without the explicit show branch, switching FROM serviceDevotee TO coordinator
+  // leaves these elements permanently hidden.
+  const isAdminOrCoord = ['superAdmin', 'teamAdmin'].includes(role);
   // admin-coordinator-only elements stay role-based (Att. Seva flag is ONLY for live attendance)
   document.querySelectorAll('.admin-coordinator-only').forEach(el => {
-    if (!['superAdmin','teamAdmin'].includes(role)) el.style.display = 'none';
+    el.style.display = isAdminOrCoord ? '' : 'none';
   });
 
   // Entry-action buttons (Add Books, Add Donation, etc.) are for coordinators only.
@@ -1773,7 +1837,9 @@ function switchTab(tab, btn) {
     if (tab === 'calling')    loadCallingStatus?.();
     if (tab === 'attendance') loadAttendanceTab?.();
     const lastView = AppState._tabView?.[tab];
-    const defaultView = TAB_VIEWS[tab].find(it => !it.divider)?.key;
+    // superAdmin default on calling tab = team-calling (they have no personal calling list)
+    const roleDefault = (tab === 'calling' && AppState.userRole === 'superAdmin') ? 'team-calling' : null;
+    const defaultView = roleDefault || TAB_VIEWS[tab].find(it => !it.divider && (!it.roles || it.roles.includes(AppState.userRole)))?.key;
     const view = lastView || defaultView;
     if (view) applyTabView(tab, view);
     _pushNavState?.(tab, view);
@@ -1790,11 +1856,12 @@ function switchTab(tab, btn) {
 // opens that view as its own screen and updates the breadcrumb path.
 const TAB_VIEWS = {
   calling: [
-    { key: 'calls',      label: 'Calls',              icon: 'fa-phone-alt' },
+    { key: 'calls',         label: 'Calls',              icon: 'fa-phone-alt', roles: ['teamAdmin','serviceDevotee'] },
+    { key: 'team-calling',  label: 'Team Calling',       icon: 'fa-users',     roles: ['teamAdmin','superAdmin'] },
     { divider: true, label: 'REPORTS' },
-    { key: 'weekly',     label: 'Weekly Report',      icon: 'fa-chart-bar' },
-    { key: 'submission', label: 'Submission Reports', icon: 'fa-chart-line' },
-    { key: 'history',    label: 'Calling History',    icon: 'fa-history' },
+    { key: 'weekly',        label: 'Weekly Report',      icon: 'fa-chart-bar' },
+    { key: 'submission',    label: 'Submission Reports', icon: 'fa-chart-line' },
+    { key: 'history',       label: 'Calling History',    icon: 'fa-history' },
   ],
   attendance: [
     { key: 'live',      label: 'Live Attendance',  icon: 'fa-check-circle' },
@@ -2020,11 +2087,17 @@ async function applyTabView(tab, view) {
 
   if (tab === 'calling') {
     if (view === 'calls') {
-      const callsBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(1)');
-      if (callsBtn) switchCallingSubTab(callsBtn, 'calls');
+      const btn = document.getElementById('calling-calls-btn');
+      if (btn) switchCallingSubTab(btn, 'calls');
+    } else if (view === 'team-calling') {
+      const btn = document.getElementById('calling-team-btn');
+      if (btn) switchCallingSubTab(btn, 'team-calling');
+    } else if (view === 'history') {
+      const btn = document.getElementById('calling-history-btn');
+      if (btn) switchCallingSubTab(btn, 'history');
     } else {
-      const reportsBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(2)');
-      if (reportsBtn) switchCallingSubTab(reportsBtn, 'reports');
+      const btn = document.getElementById('calling-reports-btn');
+      if (btn) switchCallingSubTab(btn, 'reports');
       const innerSel = view === 'weekly' ? '#calling-panel-reports .sub-tab:nth-child(1)'
                                           : '#calling-panel-reports .sub-tab:nth-child(2)';
       const innerBtn = document.querySelector(innerSel);
@@ -2051,9 +2124,10 @@ async function applyTabView(tab, view) {
       if (subId) {
         const innerBtn = document.querySelector(`#att-panel-reports .sub-tab[onclick*="'${subId}'"]`);
         if (innerBtn) switchSubTab(innerBtn, subId);
-        if (subId === 'attendance-detail' && typeof loadYearlySheet === 'function') loadYearlySheet();
-        if (subId === 'late-comers'       && typeof loadLateComersReport === 'function') loadLateComersReport();
+        if (subId === 'attendance-detail'  && typeof loadYearlySheet       === 'function') loadYearlySheet();
+        if (subId === 'late-comers'        && typeof loadLateComersReport  === 'function') loadLateComersReport();
         if (subId === 'individual-reports' && typeof _loadIndividualReports === 'function') _loadIndividualReports();
+        if (subId === 'att-accuracy'       && typeof loadAttAccuracyReport  === 'function') loadAttAccuracyReport();
       }
     }
   } else if (['books','service','registration','donation'].includes(tab)) {
@@ -2151,14 +2225,17 @@ function switchCallingSubTab(btn, sub) {
   const tabs = btn?.parentElement;
   if (tabs) tabs.querySelectorAll('.att-sub-tab').forEach(b => b.classList.remove('active'));
   btn?.classList.add('active');
-  document.getElementById('calling-panel-list').classList.toggle('active',    sub === 'calls');
-  document.getElementById('calling-panel-reports').classList.toggle('active', sub === 'reports');
-  document.getElementById('calling-panel-history')?.classList.toggle('active', sub === 'history');
+  document.getElementById('calling-panel-list')?.classList.toggle('active',       sub === 'calls');
+  document.getElementById('calling-panel-team')?.classList.toggle('active',       sub === 'team-calling');
+  document.getElementById('calling-panel-reports')?.classList.toggle('active',    sub === 'reports');
+  document.getElementById('calling-panel-history')?.classList.toggle('active',    sub === 'history');
   AppState._callingSubTab = sub;
   if (sub === 'calls') {
     loadCallingStatus?.();
+  } else if (sub === 'team-calling') {
+    loadTeamCallingList?.();
   } else if (sub === 'history') {
-    loadCallingHistoryTab?.();
+    loadCallingHistory?.();
   } else {
     _reportsCategory = 'calling';
     if (typeof _populateReportWeeks === 'function') _populateReportWeeks().then(() => loadCallingReports?.());

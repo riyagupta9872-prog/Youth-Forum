@@ -93,15 +93,22 @@ async function loadDashboard() {
       }
     }
 
-    // Activity window = the session week: from session Sunday → the following Saturday.
-    // This matches how coordinators log — services, books, registrations are
-    // entered for the week of that Sunday class.
-    const activityStart = sessionDate || today;
-    const activityEnd   = (() => {
-      const d = new Date(activityStart + 'T00:00:00');
-      d.setDate(d.getDate() + 6);
+    // Activity window = the 7-day session week: session Sunday → following Saturday.
+    // This matches how coordinators think about their work — books distributed,
+    // services logged, registrations taken are all anchored to the session week.
+    // If no session is resolved, fall back to the current 7-day week ending today.
+    const activityStart = sessionDate || (() => {
+      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 6);
       return d.toISOString().slice(0, 10);
     })();
+    const activityEnd = (() => {
+      const d = new Date(activityStart + 'T00:00:00'); d.setDate(d.getDate() + 6);
+      const sat = d.toISOString().slice(0, 10);
+      // Never show a future end date — cap at today
+      return sat > today ? today : sat;
+    })();
+    const actStartLabel = new Date(activityStart + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+    const actEndLabel   = new Date(activityEnd   + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short' });
 
     // Every fetch wrapped via safeQuery (timeout + catch fallback), so one
     // failing/hung query never blocks the rest of the Dashboard from rendering.
@@ -215,6 +222,7 @@ async function loadDashboard() {
       : null;
     const subParts = [`<i class="fas fa-clipboard-list" style="font-size:.7rem"></i> Reports for <strong>${sessLabel}</strong>`];
     if (liveLabel) subParts.push(`<i class="fas fa-circle" style="font-size:.45rem;color:#86efac;margin-right:.15rem"></i> Live cycle: <strong>${liveLabel}</strong>`);
+    subParts.push(`<i class="fas fa-calendar-week" style="font-size:.7rem"></i> Activities: <strong>${actStartLabel} – ${actEndLabel}</strong>`);
     if (filterTeam) subParts.push(`<i class="fas fa-users" style="font-size:.7rem"></i> ${filterTeam}`);
     const greetSub = document.getElementById('dash-greet-sub');
     if (greetSub) greetSub.innerHTML = subParts.join(' &nbsp;·&nbsp; ');
@@ -1046,9 +1054,25 @@ async function removeEventDevotee(devoteeId) {
 async function exportEventDevotees() {
   if (!AppState.currentEventId) return;
   try {
-    const devotees = await DB.getEventDevotees(AppState.currentEventId);
-    if (!devotees.length) return showToast('No devotees in this event', 'error');
-    const rows = devotees.map(d => ({ Name: d.name, Mobile: d.mobile || '', Team: d.team_name || '' }));
+    const [eventDevotees, allDevotees] = await Promise.all([
+      DB.getEventDevotees(AppState.currentEventId),
+      DevoteeCache.all(),
+    ]);
+    if (!eventDevotees.length) return showToast('No devotees in this event', 'error');
+    const devMap = Object.fromEntries(allDevotees.map(d => [d.id, d]));
+    const rows = eventDevotees.map(d => {
+      const full = devMap[d.devotee_id] || {};
+      return {
+        Name:                d.name,
+        Mobile:              d.mobile || '',
+        Team:                d.team_name || '',
+        'Chanting Rounds':   full.chantingRounds || 0,
+        'Gopi Dress':        full.gopiDress ? 'Yes' : 'No',
+        'Lifetime AT':       full.lifetimeAttendance || 0,
+        'Plays Instrument':  full.playsInstrument || '',
+        'Instrument':        full.instrumentName || '',
+      };
+    });
     downloadExcel(rows, 'event_devotees.xlsx');
   } catch (_) { showToast('Export failed', 'error'); }
 }
@@ -1463,15 +1487,18 @@ async function loadAttAccuracyReport() {
       d.setDate(d.getDate() - 1);
       callingDate = d.toISOString().slice(0, 10);
     }
-    const report = await DB.getCallingReport(callingDate);
+    // Pass sessionDate so getCallingReport doesn't have to re-derive it from callingDate+1,
+    // which would be wrong when the calling date is not the standard Saturday before the session.
+    const report = await DB.getCallingReport(callingDate, sessionDate);
     const teams  = Object.keys(report).filter(k => !k.startsWith('_'));
     if (!teams.length) {
       el.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i><p>No calling data for this session</p></div>';
       return;
     }
     if (!report._hasSession) {
-      const sd = new Date(sessionDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
-      el.innerHTML = `<div class="empty-state"><i class="fas fa-clock"></i><p>Attendance not yet marked for ${sd}.<br>Accuracy report available after attendance is entered.</p></div>`;
+      const sd = new Date(sessionDate + 'T00:00:00');
+      const sdLabel = sd.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+      el.innerHTML = `<div class="empty-state"><i class="fas fa-clock"></i><p>Attendance not yet marked for ${sdLabel}.<br>Accuracy report is available after the session attendance is entered.</p></div>`;
       return;
     }
     const weekLabel = new Date(callingDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });

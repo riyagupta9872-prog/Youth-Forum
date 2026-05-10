@@ -29,115 +29,272 @@ const _STATUS_COLOR = {
   'not_interested_now':'var(--danger)',
 };
 
-async function loadCallingHistoryTab() {
-  const wrap = document.getElementById('calling-history-content');
-  if (!wrap) return;
-  wrap.innerHTML = '<div class="loading" style="padding:2rem"><i class="fas fa-spinner fa-spin"></i> Loading 4-week history…</div>';
+// ── Calling History 4-week grid ───────────────────────────────────────────
+function _csCell(weekEntry) {
+  const pencil = weekEntry.wasEdited
+    ? `<span class="ch-edited" title="Edited after submission">✏</span>`
+    : '';
+  if (!weekEntry.cs) {
+    return `<div class="ch-cell-inner ch-not-called"><i class="fas fa-circle-notch"></i> Not called</div>`;
+  }
+  const cs = weekEntry.cs;
+  const note = cs.callingNotes
+    ? `<div class="ch-cell-note">"${cs.callingNotes}"</div>`
+    : '';
+  const avail = cs.availableFrom
+    ? `<div class="ch-cell-note">Available from: ${cs.availableFrom}</div>`
+    : '';
+  if (cs.comingStatus === 'Yes') {
+    return `<div class="ch-cell-inner ch-cell-yes"><i class="fas fa-check-circle"></i> Coming${pencil}${note}</div>`;
+  }
+  if (cs.callingReason) {
+    const lbl = _reasonLabel(cs.callingReason);
+    return `<div class="ch-cell-inner ch-cell-reason">${lbl}${pencil}${avail}${note}</div>`;
+  }
+  if (cs.callingNotes || cs.comingStatus) {
+    const label = cs.comingStatus || '';
+    return `<div class="ch-cell-inner ch-cell-reason">${label}${pencil}${note}</div>`;
+  }
+  return `<div class="ch-cell-inner ch-not-called"><i class="fas fa-circle-notch"></i> Not called</div>`;
+}
 
+async function loadCallingHistory() {
+  const el = document.getElementById('calling-history-grid-content');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
   try {
-    // Build last 4 Sunday dates
-    const weeks = [];
-    const cur = new Date();
-    cur.setDate(cur.getDate() - cur.getDay()); // most recent Sunday
-    for (let i = 0; i < 4; i++) {
-      weeks.push(cur.toISOString().split('T')[0]);
-      cur.setDate(cur.getDate() - 7);
-    }
-
-    const allDevotees = await DevoteeCache.all();
-    const isSA    = AppState.userRole === 'superAdmin';
-    const teamFlt = AppState.filters.team || '';
-
-    // Who to show: SA sees all (team-filtered); others see only their calling list
-    let devotees = isSA
-      ? allDevotees
-      : allDevotees.filter(d => d.callingBy === AppState.userName);
-
-    if (teamFlt) devotees = devotees.filter(d => d.teamName === teamFlt);
-    devotees.sort((a, b) =>
-      (a.teamName || '').localeCompare(b.teamName || '') || a.name.localeCompare(b.name)
-    );
+    const teamFilter   = getFilterTeam();
+    const callerFilter = getFilterCallingBy();
+    const { weeks, devotees, submMap } = await DB.getCallingHistoryGrid(teamFilter, callerFilter);
 
     if (!devotees.length) {
-      wrap.innerHTML = '<div class="empty-state"><i class="fas fa-phone-alt"></i><p>No devotees in your calling list</p></div>';
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-history"></i><p>No calling data found</p></div>';
       return;
     }
 
-    const { statusMap, changedSet } = await DB.getCallingHistoryTab(
-      weeks, AppState.userId, AppState.userName
-    );
-
-    // Week column headers
     const weekHeaders = weeks.map(w => {
-      const label = new Date(w + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-      return `<th style="text-align:center;min-width:72px;font-size:.73rem;white-space:nowrap">${label}</th>`;
+      const label = new Date(w + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+      const submitted = submMap[w]?.size > 0;
+      return `<th class="ch-wk-hdr" title="${w}">
+        ${label}
+        ${submitted ? '<br><span class="ch-sub-dot" title="Calling submitted this week">●</span>' : ''}
+      </th>`;
     }).join('');
 
-    const statusCell = (weekDate, devoteeId) => {
-      const entry = statusMap[weekDate]?.[devoteeId];
-      const changed = changedSet[weekDate]?.has(devoteeId);
-      if (!entry?.status) return `<td style="text-align:center;color:var(--text-muted);font-size:.72rem">—</td>`;
-      const s     = entry.status;
-      const short = _STATUS_SHORT[s] || s;
-      const color = _STATUS_COLOR[s] || 'var(--text-muted)';
-      const pencil = changed
-        ? `<i class="fas fa-pencil-alt" title="Updated after initial submission" style="font-size:.58rem;color:var(--warning);margin-left:.25rem;vertical-align:middle"></i>`
-        : '';
-      const tooltip = entry.reason ? _reasonLabel(entry.reason) : '';
-      return `<td style="text-align:center;padding:.35rem .3rem" title="${tooltip}">
-        <span style="font-size:.73rem;font-weight:600;color:${color};white-space:nowrap">${short}${pencil}</span>
-      </td>`;
-    };
-
-    // Group rows by team if superAdmin
-    let lastTeam = null;
-    const rows = devotees.map(d => {
+    let currentTeam = null;
+    const bodyRows = devotees.map(d => {
       let teamRow = '';
-      if (isSA && d.teamName !== lastTeam) {
-        lastTeam = d.teamName;
-        const span = 2 + weeks.length;
-        teamRow = `<tr style="background:var(--brand-subtle)">
-          <td colspan="${span}" style="font-weight:700;font-size:.75rem;padding:.3rem .6rem;color:var(--brand)">${teamBadge(d.teamName || 'No Team')}</td>
-        </tr>`;
+      if (d.teamName !== currentTeam) {
+        currentTeam = d.teamName;
+        teamRow = `<tr class="ch-team-hdr"><td colspan="${3 + weeks.length}">${teamBadge(d.teamName)}</td></tr>`;
       }
-      return teamRow + `<tr>
-        <td style="font-weight:600;font-size:.82rem;padding:.35rem .5rem;white-space:nowrap">${d.name}</td>
-        ${isSA ? `<td style="padding:.35rem .3rem;font-size:.75rem;color:var(--text-muted)">${d.callingBy || '—'}</td>` : ''}
-        ${weeks.map(w => statusCell(w, d.id)).join('')}
+      const cells = d.weeks.map(w => `<td class="ch-cell">${_csCell(w)}</td>`).join('');
+      return `${teamRow}<tr class="ch-row">
+        <td class="ch-name ch-sticky-name" onclick="openCallingHistory('${d.id}','${(d.name||'').replace(/'/g,"\\'")}')">
+          ${d.name}
+        </td>
+        <td class="ch-sticky-caller ch-caller-cell">${d.callingBy || '—'}</td>
+        ${cells}
       </tr>`;
     }).join('');
 
-    const callingByHeader = isSA ? `<th style="min-width:90px;font-size:.73rem">Calling By</th>` : '';
+    const editLegend = `
+      <span class="ch-edited" style="display:inline">✎</span>
+      <span style="font-size:.75rem;color:var(--text-muted)"> = edited after submission</span>
+      &nbsp;&nbsp;
+      <span class="ch-sub-dot" style="display:inline"></span>
+      <span style="font-size:.75rem;color:var(--text-muted)"> = week submitted</span>`;
 
-    wrap.innerHTML = `
-      <div class="panel-header" style="padding:.75rem 1rem .5rem">
-        <h2 style="font-size:.95rem"><i class="fas fa-history"></i> Calling History
-          <span style="font-size:.72rem;color:var(--text-muted);font-weight:400;margin-left:.4rem">last 4 weeks</span>
-        </h2>
-        <span style="font-size:.72rem;color:var(--text-muted)">
-          <i class="fas fa-pencil-alt" style="color:var(--warning)"></i> = updated after initial submission
-        </span>
+    el.innerHTML = `
+      <div style="padding:.5rem .75rem .4rem;font-size:.8rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+        <strong><i class="fas fa-history"></i> Last 4 Weeks — Calling History</strong>
+        <span>${editLegend}</span>
       </div>
-      <div class="table-scroll" style="overflow-x:auto">
-        <table class="calling-table" style="min-width:420px;width:100%">
+      <div class="ch-scroll-wrap">
+        <table class="calling-table ch-table">
           <thead><tr>
-            <th style="min-width:130px">Devotee</th>
-            ${callingByHeader}
+            <th class="ch-sticky-name ch-hdr-name">Devotee</th>
+            <th class="ch-sticky-caller ch-hdr-caller">Called By</th>
             ${weekHeaders}
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${bodyRows}</tbody>
         </table>
       </div>`;
-
   } catch (e) {
-    console.error('loadCallingHistoryTab', e);
-    wrap.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load history</p></div>';
+    console.error('loadCallingHistory', e);
+    el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load history</p></div>';
   }
 }
 
-// Reload history tab when filters change (if active)
+// ── Team Calling tab ───────────────────────────────────────────────────────
+async function loadTeamCallingList() {
+  const el = document.getElementById('calling-panel-team-content');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
+  try {
+    const sessionId = (typeof getFilterSessionId === 'function') ? getFilterSessionId() : null;
+    const weekDate  = sessionId && (typeof resolveCallingDate === 'function')
+      ? await resolveCallingDate(sessionId)
+      : null;
+
+    if (!weekDate) {
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-alt"></i><p>No session selected</p></div>';
+      return;
+    }
+
+    const teamFilter   = (typeof getFilterTeam      === 'function') ? getFilterTeam()      : '';
+    const callerFilter = (typeof getFilterCallingBy === 'function') ? getFilterCallingBy() : '';
+    const { devotees: allDevotees, submittedCallers } = await DB.getTeamCallingStatus(weekDate);
+
+    let list = allDevotees;
+    if (teamFilter)   list = list.filter(d => d.team_name  === teamFilter);
+    if (callerFilter) list = list.filter(d => d.calling_by === callerFilter);
+
+    if (!list.length) {
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-phone-slash"></i><p>No calling data for this week</p></div>';
+      return;
+    }
+
+    const teamMap = {};
+    list.forEach(d => {
+      const team   = d.team_name  || 'Unknown';
+      const caller = d.calling_by || '—';
+      if (!teamMap[team]) teamMap[team] = {};
+      if (!teamMap[team][caller]) teamMap[team][caller] = [];
+      teamMap[team][caller].push(d);
+    });
+
+    const weekLabel = new Date(weekDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+    let bodyHtml = '';
+    let rowNum = 0;
+    const teamOrder = TEAMS || Object.keys(teamMap);
+    teamOrder.forEach(team => {
+      if (!teamMap[team]) return;
+      bodyHtml += `<tr class="ch-team-hdr"><td colspan="99">${teamBadge(team)}</td></tr>`;
+      Object.entries(teamMap[team]).sort(([a],[b]) => a.localeCompare(b)).forEach(([caller, devotees]) => {
+        const submitted = submittedCallers.has(caller);
+        const dot = `<span class="tc-submitted-dot ${submitted ? 'yes' : 'no'}"></span>`;
+        const yes = devotees.filter(d => d.coming_status === 'Yes').length;
+        const called = devotees.filter(d => d.coming_status || d.calling_reason || d.calling_notes).length;
+        const submTag = submitted
+          ? `<span style="font-size:.68rem;background:#e8f5e9;color:#2e7d32;border-radius:3px;padding:.05rem .28rem;margin-left:.3rem">Submitted</span>`
+          : '';
+        bodyHtml += `<tr class="tc-caller-hdr">
+          <td colspan="99">${dot}<strong>${caller}</strong>${submTag}
+            <span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">${called}/${devotees.length} called · ${yes} coming</span>
+          </td>
+        </tr>`;
+        devotees.sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach(d => {
+          bodyHtml += renderCallingRow(d, ++rowNum, true);
+        });
+      });
+    });
+
+    el.innerHTML = `
+      <div style="padding:.5rem .75rem .4rem;font-size:.84rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+        <strong><i class="fas fa-users"></i> Team Calling — ${weekLabel}</strong>
+        <span style="font-size:.76rem;color:var(--text-muted)">${list.length} devotees · ${submittedCallers.size} callers submitted</span>
+      </div>
+      <div class="tc-table-scroll">
+        <table class="calling-table tc-table">
+          <thead><tr>
+            <th class="cs-num" style="min-width:26px">#</th>
+            <th class="cs-name" style="min-width:100px">Name</th>
+            <th>Mobile</th>
+            <th class="cs-team-col" style="min-width:130px">Team</th>
+            <th class="cs-callingby" style="min-width:110px">Calling By</th>
+            <th style="min-width:130px">Status</th>
+            <th style="min-width:160px">Reason &amp; Notes</th>
+          </tr></thead>
+          <tbody>${bodyHtml}</tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    console.error('loadTeamCallingList', e);
+    el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
+  }
+}
+window.loadTeamCallingList = loadTeamCallingList;
+
+// ── Calling Change History modal ───────────────────────────────────────────
+async function openCallingChangeHistory(devoteeId, devoteeName) {
+  document.getElementById('_call-hist-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = '_call-hist-modal';
+  overlay.className = 'modal-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:540px;width:95vw">
+      <div class="modal-header">
+        <h2 style="font-size:1rem"><i class="fas fa-history"></i> Calling Changes — ${devoteeName || 'Devotee'}</h2>
+        <button class="btn-icon close" onclick="document.getElementById('_call-hist-modal')?.remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div id="_call-hist-body" style="overflow:auto;max-height:65vh;padding:.5rem 1rem 1rem">
+        <div class="loading"><i class="fas fa-spinner"></i> Loading…</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  history.pushState(null, '', location.href);
+  try {
+    const records = await DB.getCallingStatusChanges(devoteeId);
+    const el = document.getElementById('_call-hist-body');
+    if (!el) return;
+    if (!records.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:2rem"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>No edits recorded yet.</p></div>';
+      return;
+    }
+    const fieldLabel = { comingStatus: 'Coming', callingReason: 'Reason', callingNotes: 'Notes' };
+    const reasonLabel = {
+      did_not_pick: 'Did not pick', incoming_na: 'Incoming N/A', wrong_number: 'Wrong number',
+      out_of_station: 'Out of station', exams: 'Exams', online_class: 'Online class',
+      festival_calling: 'Festival', not_interested_now: 'Not interested this week',
+      out_of_service: 'Out of service', '': '—',
+    };
+    const statusLabel = v => v === 'Yes' ? '✓ Coming' : v === 'Shift' ? 'Online' : v || '—';
+    const valLabel = (field, val) => {
+      if (field === 'comingStatus') return statusLabel(val);
+      if (field === 'callingReason') return reasonLabel[val] || val || '—';
+      return val || '—';
+    };
+    el.innerHTML = records.map(r => {
+      const when = r.changedAtClient
+        ? new Date(r.changedAtClient).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
+        : '—';
+      const weekDisp = r.weekDate
+        ? new Date(r.weekDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
+        : '—';
+      const changesHtml = Object.entries(r.changes || {}).map(([field, { from, to }]) => `
+        <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.25rem">
+          <span style="font-size:.72rem;background:#f1f5f9;border-radius:3px;padding:.1rem .35rem;color:var(--text-muted)">${fieldLabel[field] || field}</span>
+          <span style="font-size:.8rem;color:#c62828;text-decoration:line-through">${valLabel(field, from)}</span>
+          <i class="fas fa-arrow-right" style="font-size:.65rem;color:var(--text-muted)"></i>
+          <span style="font-size:.8rem;color:var(--success);font-weight:600">${valLabel(field, to)}</span>
+        </div>`).join('');
+      return `
+        <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:.6rem .75rem;margin-bottom:.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
+            <div>
+              <span style="font-size:.72rem;background:var(--accent-light);color:var(--brand);border-radius:3px;padding:.1rem .35rem;font-weight:600">Week: ${weekDisp}</span>
+              <span style="font-size:.72rem;color:var(--text-muted);margin-left:.4rem">by <strong>${r.changedBy || '—'}</strong></span>
+            </div>
+            <span style="font-size:.7rem;color:var(--text-muted);white-space:nowrap">${when}</span>
+          </div>
+          ${changesHtml}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    const el = document.getElementById('_call-hist-body');
+    if (el) el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load history</p></div>';
+    console.error('openCallingChangeHistory', e);
+  }
+}
+
+// Reload tabs when filters change
 document.addEventListener('filtersChanged', () => {
-  if (AppState._callingSubTab === 'history') loadCallingHistoryTab();
+  if (AppState._callingSubTab === 'history')      loadCallingHistory?.();
+  if (AppState._callingSubTab === 'team-calling') loadTeamCallingList?.();
 });
 
 function switchCallingTab(tab, btn) {
@@ -676,7 +833,7 @@ function renderCallingList(devotees, locked) {
   const wrap = document.getElementById('calling-list');
   if (!devotees.length) { wrap.innerHTML = '<div class="empty-state"><i class="fas fa-phone-slash"></i><p>No devotees found</p></div>'; return; }
   wrap.innerHTML = `<div class="calling-table-wrap"><table class="calling-table">
-    <thead><tr><th>#</th><th>Name</th><th>Mobile</th><th>Team</th><th>Calling By</th><th>${locked ? 'Status' : '✓ Coming'}</th><th>Reason &amp; Notes</th></tr></thead>
+    <thead><tr><th class="cs-num">#</th><th class="cs-name">Name</th><th>Mobile</th><th class="cs-team-col">Team</th><th class="cs-callingby">Calling By</th><th>${locked ? 'Status' : '✓ Coming'}</th><th>Reason &amp; Notes</th></tr></thead>
     <tbody>${devotees.map((d, i) => renderCallingRow(d, i + 1, locked)).join('')}</tbody>
   </table></div>`;
 }
@@ -693,6 +850,11 @@ function renderCallingRow(d, i, locked) {
   const safeId  = d.id;
   const safeName = d.name.replace(/'/g,"\\'");
 
+  // Context line shown below the name — visible on mobile where caller/team cols are hidden
+  const contextLine = (d.calling_by || d.team_name)
+    ? `<div class="tc-row-context">${d.calling_by ? `<i class="fas fa-headset"></i> ${d.calling_by}` : ''}${d.calling_by && d.team_name ? ' · ' : ''}${d.team_name ? teamBadge(d.team_name) : ''}</div>`
+    : '';
+
   if (locked) {
     const avail = (_reasonNeedsDate(reason) && d.available_from) ? ` · from ${formatDate(d.available_from)}` : '';
     let statusChip;
@@ -701,23 +863,26 @@ function renderCallingRow(d, i, locked) {
     } else if (reason) {
       statusChip = `<span style="background:#fff3e0;color:#bf360c;padding:.2rem .6rem;border-radius:4px;font-size:.82rem">${_reasonLabel(reason)}${avail}</span>`;
     } else {
-      statusChip = `<span style="color:var(--text-muted);font-size:.82rem">—</span>`;
+      statusChip = `<span style="color:var(--text-muted);font-size:.82rem"><i class="fas fa-circle-notch"></i> Not called</span>`;
     }
     const notesHtml = d.calling_notes
       ? `<div style="font-size:.75rem;color:var(--text-muted);font-style:italic">"${(d.calling_notes||'').replace(/"/g,'&quot;')}"</div>`
       : `<span style="color:var(--text-muted);font-size:.75rem">—</span>`;
     return `<tr data-id="${safeId}" class="${isYes ? 'row-confirmed' : (reason ? 'row-has-reason' : '')}">
       <td class="cs-num">${i}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:.4rem">
-          <div class="devotee-avatar" style="width:28px;height:28px;font-size:.65rem;flex-shrink:0">${initials(d.name)}</div>
-          <span class="calling-name-link" onclick="openCallingHistory('${safeId}','${safeName}')">
-            ${d.name}${isBirthdayWeek(d.dob) ? ' <i class="fas fa-birthday-cake" style="color:var(--gold);font-size:.7rem"></i>' : ''}
-          </span>
+      <td class="cs-name">
+        <div>
+          <div style="display:flex;align-items:center;gap:.4rem">
+            <div class="devotee-avatar" style="width:28px;height:28px;font-size:.65rem;flex-shrink:0">${initials(d.name)}</div>
+            <span class="calling-name-link" onclick="openCallingHistory('${safeId}','${safeName}')">
+              ${d.name}${isBirthdayWeek(d.dob) ? ' <i class="fas fa-birthday-cake" style="color:var(--gold);font-size:.7rem"></i>' : ''}
+            </span>
+          </div>
+          ${contextLine}
         </div>
       </td>
       <td>${contactIcons(d.mobile)}</td>
-      <td>${teamBadge(d.team_name)}</td>
+      <td class="cs-team-col">${teamBadge(d.team_name)}</td>
       <td class="cs-callingby">${d.calling_by || '—'}</td>
       <td>${statusChip}</td>
       <td><div class="reason-notes-cell">${notesHtml}</div></td>
@@ -729,16 +894,19 @@ function renderCallingRow(d, i, locked) {
     ? `<span class="calling-upd-time">${new Date(d.updated_at_client).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>` : '';
   return `<tr data-id="${safeId}" class="${isYes ? 'row-confirmed' : (reason ? 'row-has-reason' : '')}">
     <td class="cs-num">${i}</td>
-    <td>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <div class="devotee-avatar" style="width:28px;height:28px;font-size:.65rem;flex-shrink:0">${initials(d.name)}</div>
-        <span class="calling-name-link" onclick="openCallingHistory('${safeId}','${safeName}')">
-          ${d.name}${isBirthdayWeek(d.dob) ? ' <i class="fas fa-birthday-cake" style="color:var(--gold);font-size:.7rem"></i>' : ''}
-        </span>
+    <td class="cs-name">
+      <div>
+        <div style="display:flex;align-items:center;gap:.4rem">
+          <div class="devotee-avatar" style="width:28px;height:28px;font-size:.65rem;flex-shrink:0">${initials(d.name)}</div>
+          <span class="calling-name-link" onclick="openCallingHistory('${safeId}','${safeName}')">
+            ${d.name}${isBirthdayWeek(d.dob) ? ' <i class="fas fa-birthday-cake" style="color:var(--gold);font-size:.7rem"></i>' : ''}
+          </span>
+        </div>
+        ${contextLine}
       </div>
     </td>
     <td>${contactIcons(d.mobile)}</td>
-    <td>${teamBadge(d.team_name)}</td>
+    <td class="cs-team-col">${teamBadge(d.team_name)}</td>
     <td class="cs-callingby">${d.calling_by || '—'}</td>
     <td>
       <button class="coming-toggle${isYes ? ' active' : ''}" onclick="toggleComing('${safeId}', this)" title="${isYes ? 'Click to unmark' : 'Mark as confirmed coming'}">
@@ -769,23 +937,35 @@ async function openCallingHistory(devoteeId, devoteeName) {
   modal.classList.remove('hidden');
   try {
     const history = await DB.getCallingHistory(devoteeId, 4);
-    document.getElementById('calling-history-content').innerHTML = history.map(h => {
-      const label = formatDate(h.weekDate);
-      const isYes = h.comingStatus === 'Yes';
-      const reason = h.callingReason || '';
-      const reasonLbl = _reasonLabel(reason);
-      const avail = h.availableFrom ? ` (available from ${formatDate(h.availableFrom)})` : '';
-      const statusHtml = isYes
-        ? `<span style="font-weight:700;color:var(--success)"><i class="fas fa-check-circle"></i> Confirmed Coming</span>`
-        : (reason
-            ? `<span style="font-weight:600;color:var(--danger)">${reasonLbl}${avail}</span>`
-            : (h.comingStatus ? `<span style="font-weight:600;color:var(--text-muted)">${h.comingStatus}</span>` : '<span style="color:var(--text-muted)">Not called</span>'));
-      const note = h.callingNotes ? `<div style="font-size:.8rem;color:var(--text-muted);margin-top:.2rem;font-style:italic">"${h.callingNotes}"</div>` : '';
-      return `<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.65rem 0;border-bottom:1px solid var(--border-subtle)">
-        <div style="min-width:80px;font-size:.8rem;color:var(--text-muted)">${label}</div>
-        <div>${statusHtml}${note}</div>
-      </div>`;
-    }).join('') || '<div class="empty-state"><p>No calling history</p></div>';
+    if (!history.length) {
+      document.getElementById('calling-history-content').innerHTML = '<div class="empty-state"><p>No calling history</p></div>';
+    } else {
+      document.getElementById('calling-history-content').innerHTML = history.map(h => {
+        // Show the calling date (Saturday) exactly as stored — this is when calling happened.
+        const label = formatDate(h.weekDate);
+        const isYes   = h.comingStatus === 'Yes';
+        const reason  = h.callingReason || '';
+        const reasonLbl = _reasonLabel(reason);
+        const avail   = h.availableFrom ? `<div style="font-size:.76rem;color:var(--text-muted);margin-top:.15rem">Available from: ${formatDate(h.availableFrom)}</div>` : '';
+        // Any record (status, reason, OR notes) means calling was attempted
+        const wasCalled = !!(h.comingStatus || reason || h.callingNotes);
+        let outcomeHtml;
+        if (!wasCalled) {
+          outcomeHtml = `<span style="color:var(--text-muted);font-size:.82rem"><i class="fas fa-circle-notch"></i> Not called</span>`;
+        } else if (isYes) {
+          outcomeHtml = `<span style="font-weight:700;color:var(--success)"><i class="fas fa-check-circle"></i> Confirmed Coming</span>`;
+        } else if (reason) {
+          outcomeHtml = `<span style="font-weight:600;color:#e65100">${reasonLbl}</span>`;
+        } else {
+          outcomeHtml = '';
+        }
+        const note = h.callingNotes ? `<div style="font-size:.78rem;color:var(--text-muted);margin-top:.2rem;font-style:italic">"${h.callingNotes}"</div>` : '';
+        return `<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.65rem 0;border-bottom:1px solid var(--border-subtle)">
+          <div style="min-width:88px;font-size:.8rem;color:var(--text-muted);padding-top:.1rem">${label}</div>
+          <div>${outcomeHtml}${avail}${note}</div>
+        </div>`;
+      }).join('');
+    }
   } catch (_) {
     document.getElementById('calling-history-content').innerHTML = '<div class="empty-state"><p>Failed to load history</p></div>';
   }
@@ -965,15 +1145,19 @@ async function _loadCallingSummary(week, el) {
     teams.forEach((team, ti) => {
       const t = report[team];
       const unsub = t.unsubmittedTotal || 0;
-      gTotal += t.total; gCalled += t.called; gNC += t.notCalled;
+      // "Effective Not Called" = devotees not recorded by submitted callers
+      //                        + ALL devotees in lists of callers who never submitted
+      const effNC = t.notCalled + unsub;
+      gTotal += t.total; gCalled += t.called; gNC += effNC;
       gYes += t.yes; gOnline += (t.online||0); gFestival += (t.festival||0); gNI += (t.notInterested||0);
       gUnsubmitted += unsub;
 
       const teamId = 'team-' + ti;
-      // Show unsubmitted callers' devotee count separately so admin sees pending data
+      // Not Called = all unrecorded devotees (submitted callers' uncalled + all unsubmitted)
+      const totalNC = effNC;
       const ncCell = unsub > 0
         ? `<span style="color:#c62828">${t.notCalled}</span> <span style="color:#e65100;font-size:.72rem" title="${unsub} from callers who haven't submitted">+${unsub}⏳</span>`
-        : `<span style="color:#c62828">${t.notCalled}</span>`;
+        : `<span style="color:#c62828">${totalNC}</span>`;
 
       // Team header row — clickable to expand/collapse facilitators
       bodyRows += `<tr class="cs-team-row" data-team-id="${teamId}" style="background:var(--accent-light);font-weight:700;font-size:.83rem;cursor:pointer" onclick="_toggleCSReportTeam('${teamId}', this)">
@@ -1023,17 +1207,21 @@ async function _loadCallingSummary(week, el) {
       });
     });
 
+    const gcNote = gUnsubmitted > 0
+      ? `<span style="font-size:.72rem;color:#e65100;font-weight:400;margin-left:.4rem">(incl. ${gUnsubmitted} from unsubmitted callers)</span>`
+      : '';
+
     el.innerHTML = `<div style="font-size:.84rem;margin-bottom:.6rem">
       <strong><i class="fas fa-phone-alt"></i> Calling Summary — ${weekLabel}</strong>
     </div>
     <div class="table-scroll">
-    <table class="calling-table cs-report-table" style="margin:0;min-width:440px">
+    <table class="calling-table cs-report-table" style="margin:0;min-width:360px">
       <thead><tr>
-        <th style="min-width:108px">Team / Calling By</th>
+        <th style="min-width:140px">Team / Calling By</th>
         <th style="min-width:66px">Position</th>
         <th style="text-align:center;min-width:36px">Total</th>
         <th style="text-align:center;min-width:38px">Called</th>
-        <th style="text-align:center;min-width:50px;color:#c62828">Not Called</th>
+        <th style="text-align:center;min-width:46px;color:#c62828">Not Called</th>
         <th style="text-align:center;min-width:34px;color:var(--success)">Yes</th>
         <th style="text-align:center;min-width:38px;color:#0288d1">Online</th>
         <th style="text-align:center;min-width:38px;color:#f57f17">Festival</th>
@@ -1041,11 +1229,12 @@ async function _loadCallingSummary(week, el) {
       </tr></thead>
       <tbody>
         ${bodyRows}
-        <tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.83rem">
-          <td colspan="2">Grand Total</td>
+        <tr style="background:var(--brand);color:#fff;font-weight:700;font-size:.83rem;pointer-events:none;user-select:none">
+          <td>Grand Total</td>
+          <td></td>
           <td style="text-align:center">${gTotal}</td>
           <td style="text-align:center">${gCalled}</td>
-          <td style="text-align:center">${gNC}${gUnsubmitted > 0 ? ` <span style="font-size:.72rem;color:#ffcc80" title="${gUnsubmitted} pending from unsubmitted callers">+${gUnsubmitted}⏳</span>` : ''}</td>
+          <td style="text-align:center">${gNC}${gcNote}</td>
           <td style="text-align:center">${gYes}</td>
           <td style="text-align:center">${gOnline}</td>
           <td style="text-align:center">${gFestival}</td>
@@ -1338,22 +1527,24 @@ async function loadLateReports() {
     }).join('');
 
     const body = rows.map((r, i) => {
-      const rowCls = r.lateCount >= 4 ? 'sr-row-l4'
-                  : r.lateCount === 3 ? 'sr-row-l3'
-                  : r.lateCount === 2 ? 'sr-row-l2'
-                  : r.lateCount === 1 ? 'sr-row-l1' : '';
+      // Row tint reflects the MOST RECENT week only — avoids misleading pink on
+      // someone who was late historically but submitted on time this week.
+      const lastCell = r.cells[r.cells.length - 1];
+      const rowCls = lastCell?.state === 'late' ? 'sr-row-late-cur' : '';
+      const lateCellColor = r.lateCount > 0 ? 'var(--danger)' : 'var(--text-muted)';
+      const lateCellBg   = r.lateCount > 2 ? 'background:#fecdd3' : r.lateCount > 0 ? 'background:#fff7ed' : '';
       const badge = r.isAdmin
         ? `<span class="badge-tc" style="margin-left:.3rem;font-size:.66rem"><i class="fas fa-crown"></i> TC</span>` : '';
       return `<tr class="${rowCls}">
-        <td style="text-align:center;color:var(--text-muted);font-size:.78rem">${i + 1}</td>
-        <td style="font-weight:600">${r.name}${badge}</td>
+        <td style="text-align:center;color:var(--text-muted)">${i + 1}</td>
+        <td class="sr-name-cell">${r.name}${badge}</td>
         <td>${teamBadge(r.team)}</td>
         ${r.cells.map(c => {
           if (c.state === 'none') return `<td class="sr-cell sr-empty">—</td>`;
           if (c.state === 'late') return `<td class="sr-cell sr-late"><i class="fas fa-exclamation-circle"></i> ${c.text}</td>`;
           return `<td class="sr-cell sr-ok"><i class="fas fa-check-circle"></i> ${c.text}</td>`;
         }).join('')}
-        <td style="text-align:center;font-weight:700;color:${r.lateCount>0 ? 'var(--danger)' : 'var(--text-muted)'}">${r.lateCount}</td>
+        <td style="text-align:center;font-weight:700;color:${lateCellColor};${lateCellBg}">${r.lateCount}</td>
       </tr>`;
     }).join('');
 
@@ -1364,13 +1555,13 @@ async function loadLateReports() {
         <span style="color:var(--text-muted);font-size:.78rem"><i class="fas fa-sort-amount-up"></i> Sorted: most punctual first</span>
       </div>
       <div class="table-scroll">
-        <table class="calling-table sr-table" style="margin:0;min-width:640px">
+        <table class="calling-table sr-table" style="margin:0;min-width:440px">
           <thead><tr>
-            <th style="min-width:36px;text-align:center">#</th>
-            <th style="min-width:160px">Name</th>
-            <th style="min-width:110px">Team</th>
+            <th style="min-width:32px;text-align:center">#</th>
+            <th style="min-width:110px">Name</th>
+            <th style="min-width:100px">Team</th>
             ${weekHeaders}
-            <th style="min-width:60px;text-align:center">Late</th>
+            <th style="min-width:46px;text-align:center">Late</th>
           </tr></thead>
           <tbody>${body || '<tr><td colspan="99" style="text-align:center;padding:1.5rem;color:var(--text-muted)">No data</td></tr>'}</tbody>
         </table>
