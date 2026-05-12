@@ -15,7 +15,10 @@
       "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-devotees.js\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-calling.js\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-home.js\")",
-      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-ai-chat.js\")"
+      "Bash(curl -s \"https://raw.githubusercontent.com/riyagupta9872-prog/Sakhi-Sang-Attendence/main/js/ui-ai-chat.js\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit -m 'Compact sheet stats bar — smaller font, tighter padding \\(v196\\) *)"
     ]
   }
 }
