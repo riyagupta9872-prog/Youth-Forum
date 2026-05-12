@@ -1846,23 +1846,20 @@ button.calling-stat:active { transform: translateY(0); }
    ════════════════════════════════════════════════════ */
 /* ── Session stats bar above attendance sheet ── */
 .sheet-stats-bar {
-  display: flex; gap: .75rem; flex-wrap: wrap;
-  padding: .6rem .75rem; margin-bottom: .6rem;
+  display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+  padding: .35rem .6rem; margin-bottom: .5rem;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .sheet-stat {
-  display: flex; align-items: center; gap: .45rem;
-  font-size: .82rem; color: var(--text-muted);
+  display: flex; align-items: center; gap: .28rem;
+  font-size: .72rem; color: var(--text-muted);
 }
-.sheet-stat strong { font-size: 1.15rem; font-weight: 800; color: var(--text); }
-.sheet-stat span { font-size: .72rem; font-weight: 600; color: var(--text-muted); }
-.sheet-stat-total { border-left: 2px solid var(--border); padding-left: .75rem; margin-left: .25rem; }
+.sheet-stat i { font-size: .65rem; }
+.sheet-stat strong { font-size: .88rem; font-weight: 800; color: var(--text); }
+.sheet-stat span { font-weight: 600; }
+.sheet-stat-total { border-left: 1.5px solid var(--border); padding-left: .5rem; margin-left: .1rem; }
 .sheet-stat-total strong { color: var(--brand); }
-@media (max-width: 720px) {
-  .sheet-stats-bar { gap: .5rem; padding: .45rem .5rem; }
-  .sheet-stat strong { font-size: 1rem; }
-}
 
 .sheet-controls { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .7rem 0 .45rem; }
 .sheet-legend { display: flex; gap: .32rem; flex-wrap: wrap; padding: .35rem 0 .7rem; font-size: .7rem; }
