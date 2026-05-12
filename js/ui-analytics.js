@@ -1455,7 +1455,39 @@ async function loadYearlySheet() {
       wrap.innerHTML = `<div class="empty-state"><i class="fas fa-table"></i><p>No sessions in this ${r.period} for ${teamFilter || 'any team'}</p></div>`;
       return;
     }
-    wrap.innerHTML = buildFullSheetTable(devotees, sessions, attMap, csMap, teamFilter, attTimeMap);
+
+    // ── Session stats bar (Single Session only) ──────────────────────────────
+    // Shows the same 4 numbers as Live Attendance so coordinators don't have
+    // to switch tabs to check who confirmed, who came, and who walked in.
+    let statsHtml = '';
+    if (r.period === 'session' && sessions.length === 1) {
+      const sess = sessions[0];
+      const attendedSet = attMap[sess.id] || new Set();
+      const csForSess   = csMap[sess.sessionDate] || {};
+      const filteredIds = new Set(
+        devotees.filter(d => !teamFilter || d.teamName === teamFilter).map(d => d.id)
+      );
+      const isYes = cs => cs && (cs === 'Yes' || cs?.comingStatus === 'Yes');
+
+      let confirmed = 0, presentConfirmed = 0, newWalkIns = 0;
+      attendedSet.forEach(id => {
+        if (!filteredIds.has(id)) return;
+        if (isYes(csForSess[id])) presentConfirmed++;
+        else newWalkIns++;
+      });
+      filteredIds.forEach(id => { if (isYes(csForSess[id])) confirmed++; });
+      const totalPresent = presentConfirmed + newWalkIns;
+
+      statsHtml = `
+        <div class="sheet-stats-bar">
+          <div class="sheet-stat"><i class="fas fa-check-circle" style="color:var(--brand)"></i><strong>${confirmed}</strong><span>Confirmed</span></div>
+          <div class="sheet-stat"><i class="fas fa-user-check" style="color:var(--success)"></i><strong>${presentConfirmed}</strong><span>Present</span></div>
+          <div class="sheet-stat"><i class="fas fa-user-plus" style="color:#7c3aed"></i><strong>${newWalkIns}</strong><span>New</span></div>
+          <div class="sheet-stat sheet-stat-total"><i class="fas fa-users" style="color:var(--brand)"></i><strong>${totalPresent}</strong><span>Total Present</span></div>
+        </div>`;
+    }
+
+    wrap.innerHTML = statsHtml + buildFullSheetTable(devotees, sessions, attMap, csMap, teamFilter, attTimeMap);
   } catch (e) {
     console.error('loadYearlySheet', e);
     wrap.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
