@@ -941,7 +941,7 @@ function applyRoleUI() {
   }
 
   // Live sub-tab: ONLY visible to users with Att. Seva flag.
-  const canSeeLive = !!AppState.isAttSevaDev;
+  const canSeeLive = !!AppState.isAttSevaDev || role === 'superAdmin';
   const liveSubTabBtn = document.querySelector('#tab-attendance .att-sub-tab[onclick*="\'live\'"]');
   if (liveSubTabBtn) liveSubTabBtn.style.display = canSeeLive ? '' : 'none';
   // Only redirect to Reports if the Live panel is actually active right now —
