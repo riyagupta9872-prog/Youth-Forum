@@ -14,7 +14,7 @@ auth.onAuthStateChanged(async (user) => {
     Object.assign(AppState, {
       userRole: null, userTeam: null, userPosition: null,
       userName: '', userId: null, profilePic: null,
-      isAttSevaDev: false, _sessionExplicit: false,
+      isAttSevaDev: false, canBackdateAtt: false, _sessionExplicit: false,
       _dashboard: null, _autoSnap: null,
       callingData: [], attendanceCandidates: {}, sessionsCache: {},
       filters: { sessionId: null, team: '', callingBy: '', period: 'session', periodAnchor: null },
@@ -64,7 +64,8 @@ auth.onAuthStateChanged(async (user) => {
     AppState.userPosition  = ud.position   || null;
     AppState.userName      = ud.name       || user.email;
     AppState.profilePic    = ud.profilePic || null;
-    AppState.isAttSevaDev  = !!ud.isAttSevaDev;
+    AppState.isAttSevaDev   = !!ud.isAttSevaDev;
+    AppState.canBackdateAtt = !!ud.canBackdateAtt;
     // "Login as Attendance Service Devotee" — when checked at login, override
     // role to serviceDevotee for THIS session only (the user's actual role in
     // Firestore is unchanged). They'll only see the Attendance tab. Stored in
@@ -797,6 +798,7 @@ function openUserAction(uid) {
   document.getElementById('ua-team').value                = u.teamName || '';
   document.getElementById('ua-role').value                = u.role     || 'serviceDevotee';
   document.getElementById('ua-att-seva').checked          = !!u.isAttSevaDev;
+  document.getElementById('ua-backdate-att').checked      = !!u.canBackdateAtt;
   openModal('user-action-modal');
 }
 
@@ -805,13 +807,14 @@ async function doSaveUserAction() {
   const position     = document.getElementById('ua-position').value.trim() || null;
   const teamName     = document.getElementById('ua-team').value || null;
   const role         = document.getElementById('ua-role').value;
-  const isAttSevaDev = document.getElementById('ua-att-seva').checked;
+  const isAttSevaDev  = document.getElementById('ua-att-seva').checked;
+  const canBackdateAtt = document.getElementById('ua-backdate-att').checked;
   if (!uid) return;
   try {
-    await fdb.collection('users').doc(uid).update({ position, teamName, role, isAttSevaDev, updatedAt: TS() });
+    await fdb.collection('users').doc(uid).update({ position, teamName, role, isAttSevaDev, canBackdateAtt, updatedAt: TS() });
     // reflect in local cache
     const u = _umUsers.find(x => x.uid === uid);
-    if (u) { u.position = position; u.teamName = teamName; u.role = role; u.isAttSevaDev = isAttSevaDev; }
+    if (u) { u.position = position; u.teamName = teamName; u.role = role; u.isAttSevaDev = isAttSevaDev; u.canBackdateAtt = canBackdateAtt; }
     renderUserMgmtList();
     closeModal('user-action-modal');
     showToast('User updated!', 'success');
@@ -941,7 +944,9 @@ function applyRoleUI() {
   }
 
   // Live sub-tab: ONLY visible to users with Att. Seva flag.
-  const canSeeLive = !!AppState.isAttSevaDev || role === 'superAdmin';
+  const canSeeLive    = !!AppState.isAttSevaDev || role === 'superAdmin';
+  const canBackdate   = !!AppState.canBackdateAtt || role === 'superAdmin';
+  document.getElementById('backdate-att-wrap')?.classList.toggle('hidden', !canBackdate);
   const liveSubTabBtn = document.querySelector('#tab-attendance .att-sub-tab[onclick*="\'live\'"]');
   if (liveSubTabBtn) liveSubTabBtn.style.display = canSeeLive ? '' : 'none';
   // Only redirect to Reports if the Live panel is actually active right now —

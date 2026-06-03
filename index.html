@@ -664,6 +664,10 @@
             <i class="fas fa-calendar-alt"></i>
             <span id="session-date-text"></span>
           </span>
+          <span id="backdate-att-wrap" class="hidden" title="Pick a past session date">
+            <input type="date" id="backdate-att-input" class="filter-select" style="font-size:.78rem;padding:.25rem .5rem;width:auto"
+              onchange="loadSessionByDate(this.value)">
+          </span>
           <button class="btn btn-secondary admin-coordinator-only" onclick="exportAttendance()">
             <i class="fas fa-file-excel"></i> Export
           </button>
@@ -2096,6 +2100,16 @@
         </div>
         <label class="toggle-switch" style="margin:0" title="Grant live attendance access for all teams">
           <input type="checkbox" id="ua-att-seva">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;background:#fff7ed;border:1px solid #fed7aa;border-radius:var(--radius);gap:.75rem">
+        <div>
+          <div style="font-weight:700;font-size:.85rem;color:#c2410c"><i class="fas fa-calendar-check"></i> Back Date Attendance</div>
+          <div style="font-size:.75rem;color:var(--text-muted);margin-top:.15rem">Can change session date to mark past attendance</div>
+        </div>
+        <label class="toggle-switch" style="margin:0" title="Allow picking past session dates in Live Attendance">
+          <input type="checkbox" id="ua-backdate-att">
           <span class="toggle-slider"></span>
         </label>
       </div>
