@@ -52,11 +52,11 @@ function _loadHomeCoordinatorPerformance() {
       const ctx = await _dashResolveContext();
       const key = `${ctx.sessionId||''}|${ctx.callingDate||''}`;
       let data;
-      if (typeof _dashCache !== 'undefined' && _dashCache?.key === key) {
+      if (typeof _dashCache !== 'undefined' && _dashCache?.key === key && Date.now() - (_dashCache?.stamp || 0) < (_DASH_TTL || 180000)) {
         data = _dashCache.data;
       } else {
         data = await _dashFetchData(ctx);
-        if (typeof _dashCache !== 'undefined') window._dashCache = { key, data };
+        if (typeof _dashCache !== 'undefined') window._dashCache = { key, data, stamp: Date.now() };
       }
       // Swap ID so _dashRender writes into the home slot.
       contentEl.id = 'dashboard-content';

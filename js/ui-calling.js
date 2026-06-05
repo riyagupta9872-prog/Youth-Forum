@@ -3,6 +3,18 @@
 let _callingActiveTab = 'list';
 let _callingLocked = false;
 
+// ── Calling status cache (3 min TTL, keyed on calling Saturday date) ─────────
+let _csCache = null;  // { key: weekDate, devotees, stamp }
+const _CS_TTL = 3 * 60 * 1000;
+function _bustCallingStatusCache() { _csCache = null; }
+window._bustCallingStatusCache = _bustCallingStatusCache;
+
+// ── Calling history cache (2 min TTL, keyed on team|callingBy) ───────────────
+let _chCache = null;  // { key, data, stamp }
+const _CH_TTL = 2 * 60 * 1000;
+function _bustCallingHistoryCache() { _chCache = null; }
+window._bustCallingHistoryCache = _bustCallingHistoryCache;
+
 function switchCallingTab(tab, btn) {
   // Legacy no-op: Calling tab now shows only the calling list.
   _callingActiveTab = 'list';
@@ -201,12 +213,18 @@ async function loadCallingStatus() {
 
     window._beforeCallingDate = beforeCallingDate;
 
-    // Fetch calling data; attendance is cached per session (not re-fetched if session unchanged)
+    // Fetch calling data; devotees cached 3 min by week date, attendance cached per session
     const lastSessionId = AppState.currentSessionId;
-    const [devotees, mySubmission] = await Promise.all([
-      DB.getCallingStatus(week),
-      _callingLocked ? Promise.resolve(null) : DB.getMyCallingSubmission(week, AppState.userId).catch(() => null),
-    ]);
+    let devotees;
+    if (_csCache && _csCache.key === week && Date.now() - _csCache.stamp < _CS_TTL) {
+      devotees = _csCache.devotees;
+    } else {
+      devotees = await DB.getCallingStatus(week);
+      _csCache = { key: week, devotees, stamp: Date.now() };
+    }
+    const mySubmission = _callingLocked
+      ? null
+      : await DB.getMyCallingSubmission(week, AppState.userId).catch(() => null);
     // Only (re)fetch attendance if session changed — avoids a Firestore read on every calling tab open
     if (lastSessionId && window._callingPresentSetSession !== lastSessionId) {
       const attSnap = await fdb.collection('attendanceRecords')
@@ -1765,7 +1783,15 @@ async function loadCallingHistory() {
   try {
     const teamFilter   = getFilterTeam();
     const callerFilter = getFilterCallingBy();
-    const { weeks, devotees, submMap } = await DB.getCallingHistoryGrid(teamFilter, callerFilter);
+    const _chKey = `${teamFilter}|${callerFilter}`;
+    let _chResult;
+    if (_chCache && _chCache.key === _chKey && Date.now() - _chCache.stamp < _CH_TTL) {
+      _chResult = _chCache.data;
+    } else {
+      _chResult = await DB.getCallingHistoryGrid(teamFilter, callerFilter);
+      _chCache = { key: _chKey, data: _chResult, stamp: Date.now() };
+    }
+    const { weeks, devotees, submMap } = _chResult;
 
     if (!devotees.length) {
       el.innerHTML = '<div class="empty-state"><i class="fas fa-history"></i><p>No calling data found</p></div>';

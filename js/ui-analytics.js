@@ -18,7 +18,8 @@
 // run their own fetch — wastes at most one extra query, but eliminates the
 // possibility of hanging on a stuck shared promise (which was the real
 // source of the "stuck on Loading…" bug for super admin).
-let _dashCache = null;  // { key, data: { allDevotees, csByDevotee, presentSet, targetCfg } }
+let _dashCache = null;  // { key, data: { allDevotees, csByDevotee, presentSet, targetCfg }, stamp }
+const _DASH_TTL = 3 * 60 * 1000;
 
 function _bustDashboardCache() { _dashCache = null; }
 window._bustDashboardCache = _bustDashboardCache;
@@ -56,7 +57,7 @@ async function loadDashboard() {
   const key = `${ctx.sessionId || ''}|${ctx.callingDate || ''}`;
 
   // CACHE HIT — pure re-render with current filter state. INSTANT.
-  if (_dashCache && _dashCache.key === key) {
+  if (_dashCache && _dashCache.key === key && Date.now() - (_dashCache.stamp || 0) < _DASH_TTL) {
     safeRender(_dashCache.data, ctx);
     return;
   }
@@ -66,7 +67,7 @@ async function loadDashboard() {
 
   try {
     const data = await _dashFetchData(ctx);
-    _dashCache = { key, data };
+    _dashCache = { key, data, stamp: Date.now() };
     safeRender(data, ctx);
   } catch (e) {
     console.error('loadDashboard fetch', e);
@@ -710,8 +711,10 @@ let _careCurrentType = null;
 // re-render INSTANTLY without re-querying Firestore. Session change → cache
 // miss → fetch all 4 in parallel. Writes call _bustCareCache().
 let _careRawCache = null;  // { key, absentWeek, absent2Weeks, newcomers, inactive, saidComing: {list, weekDate} }
+let _scCache = null;       // { key: sessionDate, result, stamp } — TTL cache for _careFetchSaidComing
+const _SC_TTL = 3 * 60 * 1000;
 
-function _bustCareCache() { _careRawCache = null; }
+function _bustCareCache() { _careRawCache = null; _scCache = null; }
 window._bustCareCache = _bustCareCache;
 
 async function loadCareData() {
@@ -783,6 +786,9 @@ async function _careFetchSaidComing(masterSessionDate) {
     if (sessSnap.empty) return { list: [], weekDate: '' };
     sessionDate = sessSnap.docs[0].data().sessionDate;
   }
+  if (_scCache && _scCache.key === sessionDate && Date.now() - _scCache.stamp < _SC_TTL) {
+    return _scCache.result;
+  }
   const callingDate = await resolveCallingDate(sessionDate);
   const { list } = await DB.getYesAbsentList(callingDate, sessionDate);
   const all = await DevoteeCache.all();
@@ -801,7 +807,9 @@ async function _careFetchSaidComing(masterSessionDate) {
       calling_notes: item.callingNotes || '',
     };
   });
-  return { list: enriched, weekDate: sessionDate };
+  const result = { list: enriched, weekDate: sessionDate };
+  _scCache = { key: sessionDate, result, stamp: Date.now() };
+  return result;
 }
 
 function openCareDetail(type) {
@@ -4401,11 +4409,11 @@ async function loadCoordinatorPerformance() {
       const ctx = await _dashResolveContext();
       const key  = `${ctx.sessionId || ''}|${ctx.callingDate || ''}`;
       let data;
-      if (_dashCache && _dashCache.key === key) {
+      if (_dashCache && _dashCache.key === key && Date.now() - (_dashCache.stamp || 0) < _DASH_TTL) {
         data = _dashCache.data;
       } else {
         data = await _dashFetchData(ctx);
-        _dashCache = { key, data };
+        _dashCache = { key, data, stamp: Date.now() };
       }
       const sessLbl = ctx.sessionDate
         ? new Date(ctx.sessionDate + 'T00:00:00').toLocaleDateString('en-IN',
