@@ -200,7 +200,7 @@ function canCrossTeamManage()   { return isSuperAdmin() || !!AppState.canManageA
 function canChangeTeamFilter()  { return canCrossTeamReports() || canCrossTeamManage() || canCrossTeamCalling(); }
 
 // ── TEAMS LIST (single source of truth) ───────────────
-const TEAMS = ['Keshav','Annat','Govind','Madhav','Panchaali','Other'];
+const TEAMS = ['Keshav','Annat','Govind','Madhav','Panchaali','Janardhana','Other'];
 
 // ── ATTENDANCE TIME COLOUR ─────────────────────────────
 function attTimeStyle(markedAtISO) {

@@ -1903,8 +1903,9 @@ const _MONTHLY_TEAM_PALETTES = {
   'Annat':     ['BBDEFB','90CAF9','64B5F6','42A5F5','1E88E5','1565C0'],
   'Govind':    ['E1BEE7','CE93D8','BA68C8','AB47BC','8E24AA','6A1B9A'],
   'Madhav':    ['FFE0B2','FFCC80','FFB74D','FFA726','FB8C00','E65100'],
-  'Panchaali': ['B2EBF2','80DEEA','4DD0E1','26C6DA','00ACC1','00838F'],
-  'Other':     ['F5F5F5','EEEEEE','E0E0E0','BDBDBD','9E9E9E','757575'],
+  'Panchaali':  ['B2EBF2','80DEEA','4DD0E1','26C6DA','00ACC1','00838F'],
+  'Janardhana': ['FFF9C4','FFF59D','FFF176','FFEE58','FDD835','F9A825'],
+  'Other':      ['F5F5F5','EEEEEE','E0E0E0','BDBDBD','9E9E9E','757575'],
 };
 
 function _monthBounds(yearMonth) {
