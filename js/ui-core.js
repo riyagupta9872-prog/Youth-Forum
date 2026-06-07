@@ -285,14 +285,6 @@ async function doSignup(e) {
     _resetBtn(); return;
   }
   try {
-    // Check if this email already has a pending signup request to avoid duplicates
-    const dupCheck = await fdb.collection('signupRequests')
-      .where('email', '==', email).where('status', '==', 'pending').limit(1).get();
-    if (!dupCheck.empty) {
-      showPendingApprovalScreen();
-      _resetBtn(); return;
-    }
-
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await cred.user.updateProfile({ displayName: name });
     // First user EVER bootstraps as approved superAdmin. Everyone else lands
