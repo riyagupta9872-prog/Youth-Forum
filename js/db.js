@@ -799,8 +799,11 @@ const DB = {
       }
       return !!(d.callingBy && d.callingBy.trim());
     });
-    // Calls tab is always personal — filter to only this user's assigned devotees
-    filtered = filtered.filter(d => d.callingBy === AppState.userName);
+    // Regular callers see only their assigned devotees.
+    // Super admins and cross-team calling users see everyone (UI filters narrow it down).
+    if (!isSuperAdmin() && !canCrossTeamCalling()) {
+      filtered = filtered.filter(d => d.callingBy === AppState.userName);
+    }
     return filtered.map(d => ({
       ...toSnake(d),
       coming_status:     csMap[d.id]?.comingStatus    || null,
@@ -1093,6 +1096,7 @@ const DB = {
     }
     if (typeof _bustCallingStatusCache === 'function') _bustCallingStatusCache();
     if (typeof _bustCallingHistoryCache === 'function') _bustCallingHistoryCache();
+    if (typeof _tcBustCache === 'function') _tcBustCache();
   },
 
   async getCallingSubmissions(weekDates) {

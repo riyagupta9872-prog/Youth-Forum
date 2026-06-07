@@ -248,6 +248,7 @@ async function doLogin(e) {
   try {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (ex) {
+    if (ex.message?.includes('INTERNAL ASSERTION FAILED')) { setTimeout(() => location.reload(), 600); return; }
     const badCred = ['auth/wrong-password','auth/user-not-found','auth/invalid-credential','auth/invalid-email'];
     err.textContent = badCred.includes(ex.code) ? 'Invalid email or password' : ex.message;
     err.classList.add('show');
@@ -316,6 +317,10 @@ async function doSignup(e) {
     showPendingApprovalScreen();
     _resetBtn();
   } catch (ex) {
+    if (ex.message?.includes('INTERNAL ASSERTION FAILED')) {
+      setTimeout(() => location.reload(), 600);
+      return;
+    }
     err.textContent = ex.code === 'auth/email-already-in-use' ? 'Email already registered' : ex.message;
     err.classList.add('show');
     _resetBtn();
@@ -794,6 +799,21 @@ async function openSessionConfig() {
     document.getElementById('sc-attendance-date').value = cfg?.sessionDate  || '';
     document.getElementById('sc-calling-window').checked = cfg?.callingWindowOpen === true;
   } catch (_) {}
+
+  // Auto-fill calling date = attendance date − 1 day so they stay in sync.
+  const attEl  = document.getElementById('sc-attendance-date');
+  const callEl = document.getElementById('sc-calling-date');
+  const _syncCallingDate = () => {
+    if (!attEl.value) return;
+    const d = new Date(attEl.value + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    callEl.value = d.toISOString().slice(0, 10);
+  };
+  // Replace any previous listener to avoid duplicates.
+  attEl.removeEventListener('change', attEl._scSync);
+  attEl._scSync = _syncCallingDate;
+  attEl.addEventListener('change', _syncCallingDate);
+
   openModal('session-config-modal');
 }
 
@@ -2143,13 +2163,28 @@ function _setSessionDateDisplay(dateStr) {
 
 async function initSession() {
   try {
-    const session = await DB.getTodaySession();
-    AppState.sessionsCache[session.id] = AppState.sessionsCache[session.id] || session;
-    // Use dispatchFilters so filters.sessionId gets the date string, not the doc ID.
-    dispatchFilters({ sessionId: session.session_date, _sessionDocId: session.id });
-    _setSessionDateDisplay(session.session_date);
+    const [session, callingCfg] = await Promise.all([
+      DB.getTodaySession(),
+      DB.getCallingWeekConfig().catch(() => null),
+    ]);
+
+    // If the admin has configured a session date in the calling week config that is
+    // NEWER than the session returned by getTodaySession (which may fall back to the
+    // most recent past Sunday when the upcoming session doc doesn't exist yet),
+    // use the configured session instead. This ensures that after an admin sets up
+    // the 7 Jun session via Session Config, the app defaults to 7 Jun even before
+    // any attendance doc has been created for that Sunday.
+    let chosen = session;
+    if (callingCfg?.sessionDate && callingCfg.sessionDate > (session.session_date || '')) {
+      const cfgSession = await DB.getOrCreateSession(callingCfg.sessionDate);
+      chosen = cfgSession;
+    }
+
+    AppState.sessionsCache[chosen.id] = AppState.sessionsCache[chosen.id] || chosen;
+    dispatchFilters({ sessionId: chosen.session_date, _sessionDocId: chosen.id });
+    _setSessionDateDisplay(chosen.session_date);
     await loadSessionSelector();
-    loadAttendanceSession(session.id);
+    loadAttendanceSession(chosen.id);
   } catch (e) { console.error('Session init', e); }
 }
 
@@ -2592,7 +2627,7 @@ function _maybeRestoreLiveSession() {
 // pickers, so auto-snapping the global Session for them does nothing useful
 // (and would mislead users with a "Showing last completed session" toast).
 function _isSessionAnchoredReportsView(tab, view) {
-  const callingLiveViews = ['calls', 'said-coming', 'not-coming-present'];
+  const callingLiveViews = ['calls', 'team-calling', 'history', 'said-coming', 'not-coming-present'];
   return (tab === 'attendance' && view !== 'live')
       || (tab === 'calling' && !callingLiveViews.includes(view));
 }
@@ -2601,7 +2636,7 @@ function _isSessionAnchoredReportsView(tab, view) {
 // auto-restore logic when leaving Reports.
 function _isLiveSessionView(tab, view) {
   return (tab === 'attendance' && view === 'live')
-      || (tab === 'calling' && view === 'calls');
+      || (tab === 'calling' && (view === 'calls' || view === 'team-calling'));
 }
 
 // Maps a TAB_VIEWS key to the underlying sub-tab + sub-panel for that tab.

@@ -240,7 +240,12 @@ async function loadCallingStatus() {
     // Team / Calling By dropdowns moved to the master filter bar — nothing to
     // populate locally on this tab any more.
 
-    renderCallingStats(devotees);
+    // If the user switched to "Your Team Calling" while this fetch was running,
+    // don't overwrite its stats — skip both the stats bar and the list render,
+    // and instead refresh the team calling view so stats stay consistent.
+    if (AppState._callingSubTab !== 'team-calling') {
+      renderCallingStats(devotees);
+    }
     if (AppState.userRole === 'superAdmin') {
       const bar = document.getElementById('calling-submit-bar');
       if (bar) bar.innerHTML = '';
@@ -249,7 +254,13 @@ async function loadCallingStatus() {
     } else {
       _renderCallingSubmitBar(week, mySubmission);
     }
-    filterCallingList();
+    if (AppState._callingSubTab !== 'team-calling') {
+      filterCallingList();
+    } else {
+      // Team-calling is active: bust its cache so it re-fetches fresh stats.
+      _tcBustCache();
+      loadTeamCallingList();
+    }
   } catch (e) {
     console.error(e);
     document.getElementById('calling-list').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
@@ -275,7 +286,7 @@ function _renderSessionInfoChip(cfg, sessionDate) {
   }
   if (sessionDate) {
     const sd = new Date(sessionDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
-    parts.push(`<span class="sic-item"><i class="fas fa-chalkboard-teacher"></i> <span class="sic-label">Upcoming Class:</span> <strong>${sd}</strong></span>`);
+    parts.push(`<span class="sic-item"><i class="fas fa-chalkboard-teacher"></i> <span class="sic-label">Session:</span> <strong>${sd}</strong></span>`);
   }
   if (cfg?.sessionType) {
     const cls = cfg.sessionType === 'festival' ? 'sic-type-festival' : 'sic-type-regular';
@@ -415,6 +426,8 @@ async function doSubmitCallingWeek(week) {
   } catch (_) {
     _renderCallingSubmitBar(week, { submittedAtClient: new Date().toISOString() });
   }
+  // Refresh team calling grid so the "SUBMITTED" badge appears immediately.
+  if (typeof loadTeamCallingList === 'function') loadTeamCallingList();
 }
 
 const CALLING_REASONS = [
@@ -515,8 +528,11 @@ function filterCallingList() {
     return true;
   });
   // Stats follow whichever filters are active so the numbers always match
-  // what's visible in the list below.
-  renderCallingStats(filtered);
+  // what's visible in the list below. Skip when team-calling sub-tab is active
+  // so its stats aren't overwritten by the personal calling list.
+  if (AppState._callingSubTab !== 'team-calling') {
+    renderCallingStats(filtered);
+  }
   renderCallingList(filtered, _callingLocked);
 }
 
@@ -1914,6 +1930,9 @@ function _tcRenderTeamGrid() {
   const el = document.getElementById('calling-panel-team-content');
   if (!el || !_tcData) return;
   const { weekDate, allDevotees, submittedCallers } = _tcData;
+
+  // Keep top stats bar in sync with the same data powering the team cards.
+  if (typeof renderCallingStats === 'function') renderCallingStats(allDevotees);
 
   // Group by team and compute summary stats
   const teamStats = {};
