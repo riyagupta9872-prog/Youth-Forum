@@ -18,11 +18,21 @@
 // run their own fetch — wastes at most one extra query, but eliminates the
 // possibility of hanging on a stuck shared promise (which was the real
 // source of the "stuck on Loading…" bug for super admin).
-let _dashCache = null;  // { key, data: { allDevotees, csByDevotee, presentSet, targetCfg }, stamp }
-const _DASH_TTL = 3 * 60 * 1000;
+let _dashCache = null;  // { key, data: { allDevotees, csByDevotee, presentSet, targetCfg } }
 
 function _bustDashboardCache() { _dashCache = null; }
 window._bustDashboardCache = _bustDashboardCache;
+
+// ── REPORTS CACHES ───────────────────────────────────────────────────────────
+// DB.getSheetData is the most expensive query in the app (full period scan).
+// Cache keyed by start|end|team. 5-min TTL — fine for reports.
+let _ysCache = null;
+const _YS_TTL = 5 * 60 * 1000;
+
+// Team Leaderboard + Serious Analysis: keyed by sessionId|callingDate. 5 min.
+let _lbReportCache = null;
+let _saCache = null;
+const _REPORT_TTL = 5 * 60 * 1000;
 
 const _DASH_TIMEOUT_MS = 8000;
 function _dashSafe(p, fallback) {
@@ -57,7 +67,7 @@ async function loadDashboard() {
   const key = `${ctx.sessionId || ''}|${ctx.callingDate || ''}`;
 
   // CACHE HIT — pure re-render with current filter state. INSTANT.
-  if (_dashCache && _dashCache.key === key && Date.now() - (_dashCache.stamp || 0) < _DASH_TTL) {
+  if (_dashCache && _dashCache.key === key) {
     safeRender(_dashCache.data, ctx);
     return;
   }
@@ -67,7 +77,7 @@ async function loadDashboard() {
 
   try {
     const data = await _dashFetchData(ctx);
-    _dashCache = { key, data, stamp: Date.now() };
+    _dashCache = { key, data };
     safeRender(data, ctx);
   } catch (e) {
     console.error('loadDashboard fetch', e);
@@ -597,6 +607,11 @@ async function loadAttendanceDetail() {
 
 async function loadSeriousAnalysis() {
   const c = document.getElementById('serious-analysis-content');
+  const saKey = `${AppState.currentReportSessionId || AppState.currentSessionId || ''}`;
+  if (_saCache && _saCache.key === saKey && Date.now() - _saCache.ts < _REPORT_TTL) {
+    c.innerHTML = _saCache.html;
+    return;
+  }
   c.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i></div>';
   try {
     const callingDate = await resolveCallingDate(getWeekDate());
@@ -618,11 +633,17 @@ async function loadSeriousAnalysis() {
         return `<tr><td style="font-weight:700">${team}</td>${cells}</tr>`;
       }).join('')}
       </tbody></table></div>`;
+    _saCache = { key: saKey, html: c.innerHTML, ts: Date.now() };
   } catch (_) { c.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>'; }
 }
 
 async function loadTeamLeaderboard() {
   const c = document.getElementById('team-leaderboard-content');
+  const lbKey = `${AppState.currentReportSessionId || AppState.currentSessionId || ''}`;
+  if (_lbReportCache && _lbReportCache.key === lbKey && Date.now() - _lbReportCache.ts < _REPORT_TTL) {
+    c.innerHTML = _lbReportCache.html;
+    return;
+  }
   c.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i></div>';
   try {
     const callingDate = await resolveCallingDate(getWeekDate());
@@ -660,6 +681,7 @@ async function loadTeamLeaderboard() {
         </tr>`;
       }).join('')}
       </tbody></table></div>`;
+    _lbReportCache = { key: lbKey, html: c.innerHTML, ts: Date.now() };
   } catch (_) { c.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>'; }
 }
 
@@ -711,10 +733,8 @@ let _careCurrentType = null;
 // re-render INSTANTLY without re-querying Firestore. Session change → cache
 // miss → fetch all 4 in parallel. Writes call _bustCareCache().
 let _careRawCache = null;  // { key, absentWeek, absent2Weeks, newcomers, inactive, saidComing: {list, weekDate} }
-let _scCache = null;       // { key: sessionDate, result, stamp } — TTL cache for _careFetchSaidComing
-const _SC_TTL = 3 * 60 * 1000;
 
-function _bustCareCache() { _careRawCache = null; _scCache = null; }
+function _bustCareCache() { _careRawCache = null; }
 window._bustCareCache = _bustCareCache;
 
 async function loadCareData() {
@@ -786,9 +806,6 @@ async function _careFetchSaidComing(masterSessionDate) {
     if (sessSnap.empty) return { list: [], weekDate: '' };
     sessionDate = sessSnap.docs[0].data().sessionDate;
   }
-  if (_scCache && _scCache.key === sessionDate && Date.now() - _scCache.stamp < _SC_TTL) {
-    return _scCache.result;
-  }
   const callingDate = await resolveCallingDate(sessionDate);
   const { list } = await DB.getYesAbsentList(callingDate, sessionDate);
   const all = await DevoteeCache.all();
@@ -807,9 +824,7 @@ async function _careFetchSaidComing(masterSessionDate) {
       calling_notes: item.callingNotes || '',
     };
   });
-  const result = { list: enriched, weekDate: sessionDate };
-  _scCache = { key: sessionDate, result, stamp: Date.now() };
-  return result;
+  return { list: enriched, weekDate: sessionDate };
 }
 
 function openCareDetail(type) {
@@ -1707,6 +1722,14 @@ async function loadYearlySheet() {
   const r = _reportRange();
   const start = r.start, end = r.end;
   const teamFilter = getFilterTeam();
+  const ysKey = `${start}|${end}|${teamFilter}`;
+
+  // CACHE HIT — heavy sheet renders instantly (no Firestore round-trip)
+  if (_ysCache && _ysCache.key === ysKey && Date.now() - _ysCache.ts < _YS_TTL) {
+    wrap.innerHTML = _ysCache.html;
+    return;
+  }
+
   wrap.innerHTML = '<div class="loading" style="padding:2rem"><i class="fas fa-spinner"></i> Loading…</div>';
   try {
     const [sheetData, stats] = await Promise.all([
@@ -1739,7 +1762,9 @@ async function loadYearlySheet() {
           <span class="sh-stat-lbl">Total Present</span>
         </div>
       </div>` : '';
-    wrap.innerHTML = statsBar + buildFullSheetTable(devotees, sessions, attMap, csMap, teamFilter, attTimeMap);
+    const finalHTML = statsBar + buildFullSheetTable(devotees, sessions, attMap, csMap, teamFilter, attTimeMap);
+    _ysCache = { key: ysKey, html: finalHTML, ts: Date.now() };
+    wrap.innerHTML = finalHTML;
   } catch (e) {
     console.error('loadYearlySheet', e);
     wrap.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
@@ -3149,7 +3174,7 @@ window.loadMeetingsTab = loadMeetingsTab;
 const INTERACTION_LEVELS = {
   1: { name: 'HG Ram Atirapriya Prabhuji', abbr: 'Prabhuji (L1)', color: '#7c3aed', bg: '#f5f3ff' },
   2: { name: 'HG Sulakshana Sita Mataji',  abbr: 'Mataji (L2)',   color: '#0369a1', bg: '#eff6ff' },
-  3: { name: 'Jatin Prabhuji',              abbr: 'Senior (L3)',   color: '#0f766e', bg: '#f0fdfa' },
+  3: { name: 'Jatin Prabhuji',             abbr: 'Senior (L3)',   color: '#0f766e', bg: '#f0fdfa' },
   4: { name: 'Team Coordinator',           abbr: 'Coordinator (L4)', color: '#0d2d5a', bg: '#eef3fb' },
 };
 window.INTERACTION_LEVELS = INTERACTION_LEVELS;
@@ -4403,17 +4428,19 @@ async function loadCoordinatorPerformance() {
   if (_cpInFlight) return _cpInFlight;
   const el = document.getElementById('att-coordinator-content');
   if (!el) return;
-  el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
+  // Spinner is set only on cache-miss (mirrors loadDashboard pattern).
+  // Cache-hit path re-renders instantly without clearing the element.
   _cpInFlight = (async () => {
     try {
       const ctx = await _dashResolveContext();
       const key  = `${ctx.sessionId || ''}|${ctx.callingDate || ''}`;
       let data;
-      if (_dashCache && _dashCache.key === key && Date.now() - (_dashCache.stamp || 0) < _DASH_TTL) {
+      if (_dashCache && _dashCache.key === key) {
         data = _dashCache.data;
       } else {
+        el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
         data = await _dashFetchData(ctx);
-        _dashCache = { key, data, stamp: Date.now() };
+        _dashCache = { key, data };
       }
       const sessLbl = ctx.sessionDate
         ? new Date(ctx.sessionDate + 'T00:00:00').toLocaleDateString('en-IN',

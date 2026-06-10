@@ -1,7 +1,7 @@
-﻿/* â•â• SERVICE WORKER â€“ Sakhi Sang â•â• */
+﻿/* â•â• SERVICE WORKER â€“ Youth Forum â•â• */
 // Bump this version string every time you deploy new code.
 // This tells the browser to throw away old cached files and install fresh ones.
-const CACHE = 'youth-forum-v13';
+const CACHE = 'youth-forum-v14';
 const SHELL = [
   './index.html',
   './js/config.js',
@@ -50,10 +50,10 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App JS + CSS files: network-first, cached fallback.
-  // Guarantees users get fresh code/styles after every deployment
+  // App JS files: network-first, cached fallback.
+  // This guarantees users get fresh code after every deployment
   // without needing a hard refresh. Falls back to cache when offline.
-  if (url.includes('/js/') || url.includes('/css/')) {
+  if (url.includes('/js/')) {
     e.respondWith(
       fetch(e.request)
         .then(res => {
@@ -102,14 +102,3 @@ self.addEventListener('fetch', e => {
     })
   );
 });
-
-
-
-
-
-
-
-
-
-
-

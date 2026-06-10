@@ -799,11 +799,8 @@ const DB = {
       }
       return !!(d.callingBy && d.callingBy.trim());
     });
-    // Regular callers see only their assigned devotees.
-    // Super admins and cross-team calling users see everyone (UI filters narrow it down).
-    if (!isSuperAdmin() && !canCrossTeamCalling()) {
-      filtered = filtered.filter(d => d.callingBy === AppState.userName);
-    }
+    // Calls tab is always personal — filter to only this user's assigned devotees
+    filtered = filtered.filter(d => d.callingBy === AppState.userName);
     return filtered.map(d => ({
       ...toSnake(d),
       coming_status:     csMap[d.id]?.comingStatus    || null,
@@ -938,8 +935,6 @@ const DB = {
     // Bust those caches so next view shows fresh numbers.
     if (typeof _bustDashboardCache === 'function') _bustDashboardCache();
     if (typeof _bustCareCache === 'function') _bustCareCache();
-    if (typeof _bustCallingStatusCache === 'function') _bustCallingStatusCache();
-    if (typeof _bustCallingHistoryCache === 'function') _bustCallingHistoryCache();
   },
 
 
@@ -1073,8 +1068,6 @@ const DB = {
   async saveCallingRemarks(statusId, remarks) {
     await fdb.collection('callingStatus').doc(statusId).update({ lateRemarks: remarks, updatedAt: TS() });
     if (typeof _bustDashboardCache === 'function') _bustDashboardCache();
-    if (typeof _bustCallingStatusCache === 'function') _bustCallingStatusCache();
-    if (typeof _bustCallingHistoryCache === 'function') _bustCallingHistoryCache();
   },
 
   async submitCallingWeek(weekDate, userId, userName, teamName) {
@@ -1094,9 +1087,6 @@ const DB = {
         initialSubmittedAt: TS(), initialSubmittedAtClient: now,
       });
     }
-    if (typeof _bustCallingStatusCache === 'function') _bustCallingStatusCache();
-    if (typeof _bustCallingHistoryCache === 'function') _bustCallingHistoryCache();
-    if (typeof _tcBustCache === 'function') _tcBustCache();
   },
 
   async getCallingSubmissions(weekDates) {
