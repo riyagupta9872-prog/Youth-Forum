@@ -782,7 +782,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
         {
           name: 'Sita Devi', mobile: '8765432109', mobileAlt: '',
           dob: '1998-03-22', address: 'B-4, Govind Nagar, Mathura', email: '',
-          teamName: 'Annat', facilitator: 'Neha Prabhuji',
+          teamName: 'Anant', facilitator: 'Neha Prabhuji',
           referenceBy: '', callingBy: 'Neha Prabhuji',
           education: '12th Pass', profession: 'Student',
           chantingRounds: 8, reading: 'Occasionally', hearing: 'Occasionally',
@@ -1081,7 +1081,7 @@ function downloadImportTemplate() {
   ];
   const sample2 = [
     'Sita Devi', '8765432109', '', '1998-03-22', '', 'B-4, Govind Nagar, Mathura',
-    'Annat', 'Neha Prabhuji', '', 'Neha Prabhuji',
+    'Anant', 'Neha Prabhuji', '', 'Neha Prabhuji',
     '12th Pass', 'Student',
     '8', 'Occasionally', 'Occasionally',
     'No', 'No', 'No',
@@ -1900,7 +1900,7 @@ function downloadSkipReport() {
 // Columns: Sno | Name | Mobile | Calling By | [CS | AT per session] | Total AT
 const _MONTHLY_TEAM_PALETTES = {
   'Keshav':    ['C8E6C9','A5D6A7','81C784','66BB6A','4CAF50','388E3C'],
-  'Annat':     ['BBDEFB','90CAF9','64B5F6','42A5F5','1E88E5','1565C0'],
+  'Anant':     ['BBDEFB','90CAF9','64B5F6','42A5F5','1E88E5','1565C0'],
   'Govind':    ['E1BEE7','CE93D8','BA68C8','AB47BC','8E24AA','6A1B9A'],
   'Madhav':    ['FFE0B2','FFCC80','FFB74D','FFA726','FB8C00','E65100'],
   'Panchaali':  ['B2EBF2','80DEEA','4DD0E1','26C6DA','00ACC1','00838F'],
