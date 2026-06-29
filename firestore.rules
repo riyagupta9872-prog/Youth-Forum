@@ -50,7 +50,7 @@ service cloud.firestore {
     //            without a team assigned can't get stranded.
     match /devotees/{id} {
       allow read: if isAuth() && (
-        isSuperAdmin() || canManageAllTeams() || canAllTeamReports() || canAllTeamCalling()
+        isSuperAdmin() || canManageAllTeams() || canAllTeamReports() || canAllTeamCalling() || isAttSeva()
         || resource.data.teamName == self().teamName
         || resource.data.teamName == null
         || resource.data.teamName == ''
